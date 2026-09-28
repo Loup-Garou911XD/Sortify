@@ -1,7 +1,6 @@
 #!/bin/bash
-
-# Install Claude Code globally using npm
-echo "Installing Claude Code CLI..."
-npm install -g @anthropic-ai/claude-code
-
-echo "Claude Code installation complete!"
+echo "==> Updating package lists..."
+sudo apt-get update -y || true
+echo "==> Installing Claude Code CLI..."
+sudo npm install -g @anthropic-ai/claude-code
+echo "==> Claude Code installation finished successfully!"
