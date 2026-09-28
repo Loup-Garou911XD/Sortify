@@ -2,7 +2,6 @@
   "name": "Claude Code Workspace",
   "image": "://microsoft.com",
   "features": {},
-  "updateContentCommand": "",
   "postCreateCommand": "bash .devcontainer/postCreate.sh",
   "customizations": {
     "vscode": {
