@@ -1,5 +1,24 @@
 {
   "name": "Claude Code Workspace",
-  "image": "://microsoft.com",
-  "postCreateCommand": "bash .devcontainer/postCreate.sh"
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:26-trixie",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "mounts": [
+    "source=sortify-claude-config,target=/home/node/.claude,type=volume"
+  ],
+
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code"
+      ]
+    }
+  },
+
+  "remoteUser": "node"
 }
