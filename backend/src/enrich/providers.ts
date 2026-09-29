@@ -1,16 +1,26 @@
 import type { ProviderStatus } from "../api/types.ts";
 import { discogs } from "./discogs.ts";
+import { itunes } from "./itunes.ts";
 import { lastfm } from "./lastfm.ts";
 import type { LookupDeps } from "./lookup.ts";
 import { musicbrainz } from "./musicbrainz.ts";
 import type { ProviderClient, TagProvider } from "./provider.ts";
+import { spotify } from "./spotify.ts";
+import { youtubeTopics } from "./youtubeTopics.ts";
 
 /**
  * Every tagging provider, in the order they are asked. Resolvers (spelling correction) run in
  * this order, so put the most trusted first. To add one, write a module exporting a TagProvider
  * (see provider.ts) and list it here.
  */
-export const PROVIDERS: readonly TagProvider[] = [musicbrainz, discogs, lastfm];
+export const PROVIDERS: readonly TagProvider[] = [
+  musicbrainz,
+  discogs,
+  lastfm,
+  spotify,
+  itunes,
+  youtubeTopics,
+];
 
 export const isConfigured = (provider: TagProvider, env: NodeJS.ProcessEnv): boolean =>
   provider.envVars.every((name) => Boolean(env[name]?.trim()));

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS tracks (
   title       TEXT NOT NULL,
   channel     TEXT NOT NULL DEFAULT '',
   duration_s  INTEGER,
+  topics      TEXT,
   artist      TEXT,
   song_title  TEXT,
   external_ids TEXT,
@@ -181,9 +182,11 @@ export class Store {
     const columns = new Set(
       (this.db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[]).map((c) => c.name),
     );
-    if (columns.has("external_ids")) return;
-    // Per-provider id columns became one JSON map, so new providers need no schema change.
+    if (columns.has("external_ids") && columns.has("topics")) return;
     this.tx(() => {
+      if (!columns.has("topics")) this.db.exec("ALTER TABLE tracks ADD COLUMN topics TEXT");
+      if (columns.has("external_ids")) return;
+      // Per-provider id columns became one JSON map, so new providers need no schema change.
       this.db.exec("ALTER TABLE tracks ADD COLUMN external_ids TEXT");
       if (!columns.has("mbid")) return;
       this.db.exec(`
@@ -255,19 +258,29 @@ export class Store {
     return rows.map((r) => ({ ...r, externalIds: r.externalIds ? JSON.parse(r.externalIds) : {} }));
   }
 
-  videoIdsMissingDuration(playlistId: string): string[] {
+  /** Videos whose duration or YouTube topics have not been fetched yet. */
+  videoIdsMissingDetails(playlistId: string): string[] {
     const rows = this.prep(
       `SELECT t.video_id AS videoId FROM tracks t
          JOIN playlist_items p ON p.video_id = t.video_id
-         WHERE p.playlist_id = ? AND t.duration_s IS NULL ORDER BY p.position`,
+         WHERE p.playlist_id = ? AND (t.duration_s IS NULL OR t.topics IS NULL)
+         ORDER BY p.position`,
     ).all(playlistId) as { videoId: string }[];
     return rows.map((r) => r.videoId);
   }
 
-  setDurations(durations: Map<string, number>): void {
+  /** YouTube's topic labels for a video, e.g. ["Hip hop music", "Music of Asia"]. */
+  trackTopics(videoId: string): string[] {
+    const row = this.prep("SELECT topics FROM tracks WHERE video_id = ?").get(videoId) as
+      | { topics: string | null }
+      | undefined;
+    return row?.topics ? JSON.parse(row.topics) : [];
+  }
+
+  setVideoDetails(details: Map<string, { durationS: number | null; topics: string[] }>): void {
     this.tx(() => {
-      const stmt = this.prep("UPDATE tracks SET duration_s = ? WHERE video_id = ?");
-      for (const [videoId, seconds] of durations) stmt.run(seconds, videoId);
+      const stmt = this.prep("UPDATE tracks SET duration_s = ?, topics = ? WHERE video_id = ?");
+      for (const [videoId, d] of details) stmt.run(d.durationS, JSON.stringify(d.topics), videoId);
     });
   }
 

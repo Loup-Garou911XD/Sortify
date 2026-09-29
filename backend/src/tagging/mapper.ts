@@ -58,6 +58,11 @@ export class TagMapper {
     return subgenres.length > 0 ? subgenres : this.lookup(raw, this.families, "subgenre");
   }
 
+  /** Whether any raw tag maps to a detailed subgenre (not just a broad family). */
+  hasSubgenre(raw: RawTag[]): boolean {
+    return raw.some((r) => this.subgenres.has(normalizeTag(r.tag)));
+  }
+
   moodTags(raw: RawTag[]): Tag[] {
     return this.lookup(raw, this.moods, "mood");
   }

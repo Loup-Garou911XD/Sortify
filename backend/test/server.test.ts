@@ -28,8 +28,8 @@ class FakeYouTube implements YouTubeApi {
       { videoId: "n2", title: "B - Two", channel: "B" },
     ];
   }
-  async videoDurations(ids: string[]) {
-    return new Map(ids.map((id) => [id, 200]));
+  async videoDetails(ids: string[]) {
+    return new Map(ids.map((id) => [id, { durationS: 200, topics: ["Pop music"] }]));
   }
   async myPlaylists() {
     return [];
@@ -150,6 +150,9 @@ describe("api", () => {
       ["musicbrainz", true],
       ["discogs", true],
       ["lastfm", false],
+      ["spotify", false],
+      ["itunes", true],
+      ["youtube", true],
     ]);
     expect(body.sources[2]).toMatchObject({ label: "Last.fm", envVars: ["LASTFM_API_KEY"] });
     expect(body.signedIn).toBe(false);
@@ -241,6 +244,7 @@ describe("api", () => {
     expect(res.body.kind).toBe("fetch");
     await app.jobs.idle();
     expect(store.getPlaylist("PLnew")?.title).toBe("Fetched Mix");
+    expect(store.trackTopics("n1")).toEqual(["Pop music"]);
     expect(app.jobs.current()?.message).toMatch(/Added "Fetched Mix" \(2 tracks/);
     expect(
       (await api("/api/playlists", { method: "POST", body: { url: "nope nope" } })).status,

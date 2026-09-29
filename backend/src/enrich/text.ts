@@ -22,6 +22,27 @@ function bigrams(value: string): Map<string, number> {
 }
 
 /**
+ * The candidate that best matches `target` by similarity, if any reaches `min`. Exact matches beat
+ * "contains" matches, so "Softly" wins over "Softly (Tiësto Remix)"; ties keep the earlier one.
+ */
+export function bestMatch<T>(
+  candidates: readonly T[],
+  score: (candidate: T) => number,
+  min: number,
+): T | undefined {
+  let best: T | undefined;
+  let bestScore = min;
+  for (const candidate of candidates) {
+    const s = score(candidate);
+    if (s > bestScore || (best === undefined && s >= min)) {
+      best = candidate;
+      bestScore = s;
+    }
+  }
+  return best;
+}
+
+/**
  * Similarity in [0, 1] for artist/title matching: Sørensen–Dice over character bigrams, with a
  * floor of 0.9 when one normalized string contains the other ("Beyonce" vs "Beyoncé feat. X").
  */

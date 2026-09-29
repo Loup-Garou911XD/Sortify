@@ -19,11 +19,15 @@ export interface TagProvider {
 }
 
 export interface TrackQuery {
+  /** The YouTube video, for providers that use data stored per video. */
+  videoId: string;
   artist: string;
   title: string;
 }
 
-export interface Resolution extends TrackQuery {
+export interface Resolution {
+  artist: string;
+  title: string;
   /** The provider's id for the matched recording or release. */
   externalId?: string;
   genres?: RawTag[];
@@ -39,6 +43,11 @@ export interface TrackTags {
 /** One provider for one tagging run. Implement whichever steps the service can do. */
 export interface ProviderClient {
   readonly id: string;
+  /**
+   * Ask only about tracks the other providers gave no subgenre, e.g. for a slow or strictly
+   * rate-limited service. Fallback providers run after the parallel step, before artist tags.
+   */
+  readonly fallback?: boolean;
   /**
    * Finds the track in the provider's catalogue and returns its canonical spelling. Resolvers run
    * first, in PROVIDERS order; the first match wins and the later steps use its spelling.

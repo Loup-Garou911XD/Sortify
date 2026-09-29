@@ -136,7 +136,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   const label = (id: string) => {
     const t = byId.get(id);
     if (!t) return id;
-    return t.songTitle && t.artist ? `${t.songTitle} — ${t.artist}` : t.title;
+    return t.songTitle && t.artist ? `${t.songTitle} by ${t.artist}` : t.title;
   };
 
   return (

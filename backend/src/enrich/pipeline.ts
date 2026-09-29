@@ -28,9 +28,10 @@ export interface EnrichedTrack {
 const DEFAULT_CONCURRENCY = 4;
 
 /**
- * Tags one track: song-type rules from the title, then the providers in three steps — the first
+ * Tags one track: song-type rules from the title, then the providers in four steps — the first
  * resolver that recognises the track fixes its spelling, all providers' track tags are fetched in
- * parallel, and artist-level tags fill in only when nothing else gave a genre.
+ * parallel, fallback providers are asked only if no subgenre was found, and artist-level tags
+ * fill in only when nothing gave a genre at all.
  */
 export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<EnrichedTrack> {
   const parsed = parseTitle(track.title, track.channel);
@@ -41,7 +42,11 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
   }
 
   const clients = enrichers.clients.filter((c) => !c.skip?.(parsed));
-  let query: TrackQuery = { artist: parsed.artist, title: parsed.songTitle };
+  let query: TrackQuery = {
+    videoId: track.videoId,
+    artist: parsed.artist,
+    title: parsed.songTitle,
+  };
   const genreRaw: RawTag[] = [];
   const moodRaw: RawTag[] = [];
 
@@ -49,22 +54,26 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
   for (const client of clients) {
     const match = await client.resolve?.(query);
     if (!match) continue;
-    query = { artist: match.artist, title: match.title };
+    query = { ...query, artist: match.artist, title: match.title };
     if (match.externalId) externalIds[client.id] = match.externalId;
     genreRaw.push(...(match.genres ?? []));
     resolved = true;
     break;
   }
 
-  const results = await Promise.all(
-    clients.map(async (client) => ({ client, tags: await client.trackTags?.(query) })),
-  );
-  for (const { client, tags: found } of results) {
-    if (!found) continue;
-    if (found.externalId) externalIds[client.id] = found.externalId;
-    genreRaw.push(...found.genres);
-    moodRaw.push(...(found.moods ?? []));
-  }
+  const collect = async (asked: ProviderClient[]): Promise<void> => {
+    const results = await Promise.all(
+      asked.map(async (client) => ({ client, found: await client.trackTags?.(query) })),
+    );
+    for (const { client, found } of results) {
+      if (!found) continue;
+      if (found.externalId) externalIds[client.id] = found.externalId;
+      genreRaw.push(...found.genres);
+      moodRaw.push(...(found.moods ?? []));
+    }
+  };
+  await collect(clients.filter((c) => !c.fallback));
+  if (!enrichers.mapper.hasSubgenre(genreRaw)) await collect(clients.filter((c) => c.fallback));
 
   let genres = enrichers.mapper.genres(genreRaw);
   // A guessed artist (e.g. from a label upload's credits) could pull in someone else's genres.

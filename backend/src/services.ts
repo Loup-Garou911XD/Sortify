@@ -15,7 +15,7 @@ export function youtubeFor(config: Config): YouTubeClient {
 
 export type PlaylistReader = Pick<
   YouTubeClient,
-  "quotaUsed" | "getPlaylistTitle" | "playlistEntries" | "videoDurations"
+  "quotaUsed" | "getPlaylistTitle" | "playlistEntries" | "videoDetails"
 >;
 
 export interface FetchResult {
@@ -36,8 +36,8 @@ export async function fetchPlaylist(
   const title = await yt.getPlaylistTitle(playlistId);
   const entries = await yt.playlistEntries(playlistId);
   store.savePlaylist(playlistId, title, entries);
-  const missing = store.videoIdsMissingDuration(playlistId);
-  if (missing.length > 0) store.setDurations(await yt.videoDurations(missing));
+  const missing = store.videoIdsMissingDetails(playlistId);
+  if (missing.length > 0) store.setVideoDetails(await yt.videoDetails(missing));
   return {
     playlistId,
     title,

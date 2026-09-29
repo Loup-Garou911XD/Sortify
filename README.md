@@ -38,14 +38,18 @@ The easiest place for this and the API keys below is a `.env` file in the repo r
 
 In testing mode Google expires the sign-in after 7 days; run `sortify auth` again when that happens.
 
-### 2. Metadata API keys (recommended)
+### 2. Tag sources
 
-| Variable | Where to get it | Used for |
+| Provider | Setting | Used for |
 | --- | --- | --- |
-| `DISCOGS_TOKEN` | Discogs → Settings → Developers → *Generate new token* | Subgenres (main source) |
-| `LASTFM_API_KEY` | [last.fm/api/account/create](https://www.last.fm/api/account/create) | Moods, and subgenres when Discogs has none |
+| MusicBrainz | none | Corrects artist and title spelling |
+| Discogs | `DISCOGS_TOKEN` (Discogs → Settings → Developers → *Generate new token*) | Detailed subgenres (main source) |
+| Last.fm | `LASTFM_API_KEY` ([last.fm/api/account/create](https://www.last.fm/api/account/create)) | Moods, and subgenres |
+| Spotify | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` (an app at [developer.spotify.com](https://developer.spotify.com/dashboard)) | Detailed artist genres such as desi hip hop or punjabi pop |
+| iTunes | none (`ITUNES_COUNTRY` picks the store, default `US`) | Store genres such as Bollywood or Punjabi Pop, asked only when the others found no subgenre (Apple allows about 20 requests a minute, so it slows tagging a little) |
+| YouTube topics | none | Broad genres from YouTube's own topic labels, collected free when a playlist is fetched or refreshed |
 
-MusicBrainz needs no key. Without Discogs and Last.fm, most tracks end up in *Unsorted*.
+Providers without their setting are skipped; `sortify enrich --skip itunes,spotify` skips others for one run. Without Discogs and Last.fm, many tracks only get a broad genre.
 
 ## Web interface
 

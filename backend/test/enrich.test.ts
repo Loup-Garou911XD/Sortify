@@ -201,9 +201,9 @@ describe("lookup errors", () => {
       fetch: async () => json({ message: "Invalid consumer token" }, 401),
       sleep: async () => {},
     };
-    await expect(new Discogs(deps, "bad").trackTags({ artist: "A", title: "B" })).rejects.toThrow(
-      /Discogs rejected the request \(HTTP 401\)/,
-    );
+    await expect(
+      new Discogs(deps, "bad").trackTags({ videoId: "v", artist: "A", title: "B" }),
+    ).rejects.toThrow(/Discogs rejected the request \(HTTP 401\)/);
   });
 
   it("retries 503s and gives up without caching", async () => {
@@ -219,7 +219,9 @@ describe("lookup errors", () => {
       },
       sleep: async () => {},
     };
-    expect(await new MusicBrainz(deps).resolve({ artist: "A", title: "B" })).toBeUndefined();
+    expect(
+      await new MusicBrainz(deps).resolve({ videoId: "v", artist: "A", title: "B" }),
+    ).toBeUndefined();
     expect(calls).toBe(3);
     expect(store.cacheGet("musicbrainz", "a\u0000b")).toBeUndefined();
   });
@@ -338,8 +340,19 @@ describe("providers", () => {
       ["musicbrainz", true],
       ["discogs", true],
       ["lastfm", false],
+      ["spotify", false],
+      ["itunes", true],
+      ["youtube", true],
     ]);
-    expect(createProviderClients(deps, env).map((c) => c.id)).toEqual(["musicbrainz", "discogs"]);
-    expect(createProviderClients(deps, env, ["musicbrainz"]).map((c) => c.id)).toEqual(["discogs"]);
+    expect(createProviderClients(deps, env).map((c) => c.id)).toEqual([
+      "musicbrainz",
+      "discogs",
+      "itunes",
+      "youtube",
+    ]);
+    expect(createProviderClients(deps, env, ["musicbrainz", "itunes"]).map((c) => c.id)).toEqual([
+      "discogs",
+      "youtube",
+    ]);
   });
 });

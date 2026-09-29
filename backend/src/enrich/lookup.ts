@@ -78,8 +78,8 @@ export interface ServiceOptions {
   source: string;
   /** Minimum gap between requests, from the service's rate limit. */
   intervalMs: number;
-  /** Sent with every request, e.g. an Authorization header. */
-  headers?: Record<string, string>;
+  /** Sent with every request, e.g. an Authorization header; a function for short-lived tokens. */
+  headers?: Record<string, string> | (() => Promise<Record<string, string>>);
 }
 
 export interface LookupRequest<T> {
@@ -140,14 +140,15 @@ export class ServiceClient {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       this.deps.budget.take();
       await this.limiter.wait();
+      // Outside the try: a failing token request is a configuration error, not a network blip.
+      const extra =
+        typeof this.options.headers === "function"
+          ? await this.options.headers()
+          : this.options.headers;
       let res: Response;
       try {
         res = await fetchImpl(request.url, {
-          headers: {
-            "user-agent": this.deps.userAgent,
-            accept: "application/json",
-            ...this.options.headers,
-          },
+          headers: { "user-agent": this.deps.userAgent, accept: "application/json", ...extra },
         });
       } catch {
         this.limiter.penalize(1000 * attempt);

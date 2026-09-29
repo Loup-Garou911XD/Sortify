@@ -41,6 +41,16 @@ interface ApiErrorBody {
 const QUOTA_REASONS = new Set(["quotaExceeded", "dailyLimitExceeded"]);
 const MAX_ATTEMPTS = 4;
 
+export interface VideoDetails {
+  durationS: number | null;
+  topics: string[];
+}
+
+/** "https://en.wikipedia.org/wiki/Hip_hop_music" → "Hip hop music". */
+export function topicName(url: string): string {
+  return decodeURIComponent(url.slice(url.lastIndexOf("/") + 1)).replace(/_/g, " ");
+}
+
 /** Converts an ISO 8601 duration such as PT1H2M3S to seconds. */
 export function parseIsoDuration(value: string): number | null {
   const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(value);
@@ -156,23 +166,37 @@ export class YouTubeClient {
     return entries;
   }
 
-  async videoDurations(videoIds: string[]): Promise<Map<string, number>> {
-    const durations = new Map<string, number>();
+  /**
+   * Duration and YouTube's own topic labels ("Hip hop music", "Music of Asia") for each video.
+   * Both parts come from one videos.list call, 1 quota unit per 50 videos.
+   */
+  async videoDetails(videoIds: string[]): Promise<Map<string, VideoDetails>> {
+    const details = new Map<string, VideoDetails>();
     for (let i = 0; i < videoIds.length; i += 50) {
       const data = await this.request<{
-        items: { id: string; contentDetails: { duration: string } }[];
+        items: {
+          id: string;
+          contentDetails?: { duration: string };
+          topicDetails?: { topicCategories?: string[] };
+        }[];
       }>(
         "GET",
         "videos",
-        { part: "contentDetails", id: videoIds.slice(i, i + 50).join(","), maxResults: "50" },
+        {
+          part: "contentDetails,topicDetails",
+          id: videoIds.slice(i, i + 50).join(","),
+          maxResults: "50",
+        },
         QUOTA_COST.list,
       );
       for (const item of data.items) {
-        const seconds = parseIsoDuration(item.contentDetails.duration);
-        if (seconds !== null) durations.set(item.id, seconds);
+        details.set(item.id, {
+          durationS: parseIsoDuration(item.contentDetails?.duration ?? ""),
+          topics: (item.topicDetails?.topicCategories ?? []).map(topicName),
+        });
       }
     }
-    return durations;
+    return details;
   }
 
   /** The signed-in user's playlists, with descriptions (used to find Sortify's own). */
