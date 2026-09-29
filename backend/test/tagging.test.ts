@@ -58,3 +58,14 @@ describe("TagMapper", () => {
     );
   });
 });
+
+describe("loadConfig", () => {
+  it("resolves relative paths against the directory npm was run from", async () => {
+    const { loadConfig } = await import("../src/config.ts");
+    const config = loadConfig({ INIT_CWD: "/repo", SORTIFY_CLIENT_SECRETS: "secrets/client.json" });
+    expect(config.clientSecretsPath).toBe("/repo/secrets/client.json");
+    expect(loadConfig({ SORTIFY_CLIENT_SECRETS: "/abs/c.json" }).clientSecretsPath).toBe(
+      "/abs/c.json",
+    );
+  });
+});

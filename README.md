@@ -12,9 +12,13 @@ Sortify is a command-line tool. It reads a YouTube or YouTube Music playlist, ta
 ## Setup
 
 ```sh
-npm install
-npm run build        # builds the CLI and the web UI; or run from source with `npm run sortify -- <command>`
+npm install          # installs backend/ and frontend/
+npm run build        # builds the web UI and the CLI
 ```
+
+In the commands below, `sortify` stands for `npm run -s sortify --` run from the repo root (or `node backend/dist/cli.js` after a build).
+
+The code is split into `backend/` (CLI, local API server, tagging and planning) and `frontend/` (the React web UI that the backend serves).
 
 ### 1. Google OAuth client (required)
 
@@ -70,7 +74,7 @@ The default quota is 10,000 units a day. Adding a track or creating a playlist c
 
 ### Customising the labels
 
-The built-in subgenre and mood lists live in `src/tagging/defaultTagMap.ts`. To change them without editing code, create `~/.config/sortify/tag_map.yaml` with any of the sections `families`, `subgenres` and `moods`. Each section you include replaces the built-in one:
+The built-in subgenre and mood lists live in `backend/src/tagging/defaultTagMap.ts`. To change them without editing code, create `~/.config/sortify/tag_map.yaml` with any of the sections `families`, `subgenres` and `moods`. Each section you include replaces the built-in one:
 
 ```yaml
 moods:
@@ -91,9 +95,10 @@ moods:
 ## Development
 
 ```sh
-npm test             # vitest
+npm run dev          # backend + frontend with hot reload (UI on http://localhost:5173)
+npm test             # backend tests (vitest)
 npm run lint         # biome
-npm run typecheck    # tsc
+npm run typecheck    # tsc, both workspaces
 npm run format       # biome --write
 ```
 

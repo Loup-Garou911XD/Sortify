@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
 import { Store } from "../db.ts";
@@ -10,7 +11,9 @@ import { createApp } from "./app.ts";
  * backend/dist/server; SORTIFY_UI_DIR overrides it.
  */
 export const DEFAULT_STATIC_DIR =
-  process.env.SORTIFY_UI_DIR ?? fileURLToPath(new URL("../../../frontend/dist/", import.meta.url));
+  (process.env.SORTIFY_UI_DIR &&
+    resolve(process.env.INIT_CWD ?? process.cwd(), process.env.SORTIFY_UI_DIR)) ??
+  fileURLToPath(new URL("../../../frontend/dist/", import.meta.url));
 
 export async function startServer(
   config: Config,

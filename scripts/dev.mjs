@@ -2,12 +2,16 @@
 // Usage: npm run dev. The servers are spawned directly (not through npm) so stopping this
 // script stops them too.
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 const root = new URL("../", import.meta.url);
 const backend = new URL("backend/", root);
 const frontend = new URL("frontend/", root);
-const vite = createRequire(new URL("package.json", frontend)).resolve("vite/bin/vite.js");
+const vitePkg = createRequire(new URL("package.json", frontend)).resolve("vite/package.json");
+const viteBin = JSON.parse(readFileSync(vitePkg, "utf8")).bin.vite;
+const vite = join(dirname(vitePkg), viteBin);
 
 const children = [
   spawn(process.execPath, ["--watch-path=src", "src/cli.ts", "ui"], {
