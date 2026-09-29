@@ -13,7 +13,7 @@ Sortify is a command-line tool. It reads a YouTube or YouTube Music playlist, ta
 
 ```sh
 npm install
-npm run build        # or run from source with `npm run sortify -- <command>`
+npm run build        # builds the CLI and the web UI; or run from source with `npm run sortify -- <command>`
 ```
 
 ### 1. Google OAuth client (required)
@@ -39,7 +39,17 @@ In testing mode Google expires the sign-in after 7 days; run `sortify auth` agai
 
 MusicBrainz needs no key. Without Discogs and Last.fm, most tracks end up in *Unsorted*.
 
-## Usage
+## Web interface
+
+```sh
+sortify ui           # then open http://127.0.0.1:4747
+```
+
+The web interface covers the whole flow: connect YouTube, add playlists, tag tracks with live progress, and preview the split. Before saving, you can rename playlists, leave groups out and remove single tracks. It then creates the playlists with a live progress bar, and you can stop and resume at any time. It only listens on this machine (`--port` changes the port). In a Codespace, open the forwarded port; if Google's sign-in page can't redirect back, the sign-in dialog lets you paste the address instead. Set `SORTIFY_UI_ALLOWED_HOSTS` if you reach it under another hostname.
+
+## Command line
+
+The same steps are available as commands:
 
 ```sh
 sortify fetch "https://music.youtube.com/playlist?list=PL..."   # read the playlist (cheap on quota)
