@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Must stay the first import: it fills process.env from .env before other modules read it.
+import "./env.ts";
 import { createInterface } from "node:readline/promises";
 import { Command, InvalidArgumentError, Option } from "commander";
 import { applyRun, type Privacy } from "./apply.ts";

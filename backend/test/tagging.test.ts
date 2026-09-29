@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadTagMap, normalizeTag, TagMapper } from "../src/tagging/mapper.ts";
+import { authState } from "../src/youtube/auth.ts";
+import { tempDir, testConfig } from "./helpers.ts";
 
 describe("normalizeTag", () => {
   it("treats spelling variants as one tag", () => {
@@ -48,7 +49,7 @@ describe("TagMapper", () => {
   });
 
   it("lets a YAML file replace a section", () => {
-    const dir = mkdtempSync(join(tmpdir(), "sortify-"));
+    const dir = tempDir();
     const path = join(dir, "tag_map.yaml");
     writeFileSync(path, "moods:\n  Cozy: [chill, warm]\n");
     const custom = new TagMapper(loadTagMap(path));
@@ -60,12 +61,41 @@ describe("TagMapper", () => {
 });
 
 describe("loadConfig", () => {
-  it("resolves relative paths against the directory npm was run from", async () => {
-    const { loadConfig } = await import("../src/config.ts");
-    const config = loadConfig({ INIT_CWD: "/repo", SORTIFY_CLIENT_SECRETS: "secrets/client.json" });
-    expect(config.clientSecretsPath).toBe("/repo/secrets/client.json");
-    expect(loadConfig({ SORTIFY_CLIENT_SECRETS: "/abs/c.json" }).clientSecretsPath).toBe(
-      "/abs/c.json",
-    );
+  it("resolves relative paths against the directory npm was run from", () => {
+    const config = testConfig({ INIT_CWD: "/repo", SORTIFY_CLIENT_SECRETS: "secrets/client.json" });
+    expect(config.clientSecrets).toEqual({ path: "/repo/secrets/client.json" });
+    expect(testConfig({ SORTIFY_CLIENT_SECRETS: " /abs/c.json " }).clientSecrets).toEqual({
+      path: "/abs/c.json",
+    });
+  });
+
+  it("recognises the OAuth client JSON given inline", () => {
+    const json = '{"installed":{}}';
+    expect(testConfig({ SORTIFY_CLIENT_SECRETS: `  ${json}\n` }).clientSecrets).toEqual({ json });
+  });
+});
+
+describe("authState", () => {
+  const client = '{"installed":{"client_id":"id","client_secret":"secret"}}';
+
+  it("accepts the OAuth client JSON inline or as a file path", () => {
+    const file = join(tempDir(), "client.json");
+    writeFileSync(file, client);
+    for (const value of [client, file]) {
+      expect(authState(testConfig({ SORTIFY_CLIENT_SECRETS: value }))).toEqual({
+        clientSecretsError: null,
+        signedIn: false,
+      });
+    }
+  });
+
+  it("explains why the OAuth client cannot be used", () => {
+    const error = (value?: string) =>
+      authState(testConfig(value === undefined ? {} : { SORTIFY_CLIENT_SECRETS: value }))
+        .clientSecretsError;
+    expect(error()).toMatch(/not set/);
+    expect(error("/nope/client.json")).toMatch(/does not exist/);
+    expect(error("{not json")).toMatch(/not valid JSON/);
+    expect(error('{"other":{}}')).toMatch(/does not look like/);
   });
 });

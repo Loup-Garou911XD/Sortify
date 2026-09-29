@@ -11,6 +11,8 @@ export type Privacy = "private" | "unlisted" | "public";
 export interface StatusResponse {
   version: string;
   hasClientSecrets: boolean;
+  /** Why the OAuth client could not be loaded (unset, missing file, invalid JSON). */
+  clientSecretsError: string | null;
   signedIn: boolean;
   sources: { musicbrainz: boolean; discogs: boolean; lastfm: boolean };
   dailyQuota: number;

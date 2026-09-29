@@ -25,8 +25,9 @@ import { createEnrichers, fetchPlaylist, type PlaylistReader } from "../services
 import {
   authState,
   beginWebAuth,
+  describeAuthError,
   finishWebAuth,
-  type PendingAuth,
+  PendingAuthStore,
   signOut,
 } from "../youtube/auth.ts";
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
@@ -167,7 +168,7 @@ export function createApp(deps: AppDeps) {
     signOut,
   };
   const jobs = new JobRunner();
-  let pendingAuth: PendingAuth | null = null;
+  const pendingAuth = new PendingAuthStore(config.pendingAuthPath);
   const redirectUri = `http://127.0.0.1:${deps.port}/`;
 
   const hostAllowed = (host: string | undefined): boolean => {
@@ -234,6 +235,7 @@ export function createApp(deps: AppDeps) {
         const state = auth.state(config);
         return {
           version: VERSION,
+          hasClientSecrets: state.clientSecretsError === null,
           ...state,
           sources: {
             musicbrainz: true,
@@ -248,8 +250,9 @@ export function createApp(deps: AppDeps) {
       "POST",
       /^\/api\/auth\/start$/,
       async () => {
-        pendingAuth = await auth.begin(config, redirectUri);
-        return { url: pendingAuth.url };
+        const pending = await auth.begin(config, redirectUri);
+        pendingAuth.add(pending);
+        return { url: pending.url };
       },
     ],
     [
@@ -469,14 +472,17 @@ export function createApp(deps: AppDeps) {
 
   async function completeAuth(params: URLSearchParams): Promise<void> {
     const error = params.get("error");
-    if (error) throw new HttpError(400, `Google sign-in failed: ${error}`);
+    if (error) throw new HttpError(400, describeAuthError(error));
     const code = params.get("code");
     if (!code) throw new HttpError(400, "That URL has no sign-in code");
-    if (!pendingAuth || params.get("state") !== pendingAuth.state) {
-      throw new HttpError(400, "Sign-in expired or came from elsewhere; start again");
+    const pending = pendingAuth.take(params.get("state") ?? "");
+    if (!pending) {
+      throw new HttpError(
+        400,
+        "This sign-in is older than 15 minutes, was already used, or was not started here. " +
+          "Click “Open Google sign-in” again.",
+      );
     }
-    const pending = pendingAuth;
-    pendingAuth = null;
     await auth.finish(config, pending, code);
   }
 

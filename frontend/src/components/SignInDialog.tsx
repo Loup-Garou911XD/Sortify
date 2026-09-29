@@ -67,14 +67,22 @@ export function SignInDialog({
       {!status?.hasClientSecrets ? (
         <>
           <p>Sortify needs an OAuth client from Google Cloud before you can sign in.</p>
+          {status?.clientSecretsError && (
+            <Notice tone="warn">The server says: {status.clientSecretsError}</Notice>
+          )}
           <ol className="steps">
             <li>
               In Google Cloud Console, enable <strong>YouTube Data API v3</strong>.
             </li>
             <li>Create an OAuth client ID of type Desktop app and download its JSON file.</li>
             <li>
-              Set <code>SORTIFY_CLIENT_SECRETS=/path/to/client_secret.json</code> and restart{" "}
-              <code>sortify ui</code>.
+              Set <code>SORTIFY_CLIENT_SECRETS</code> to the contents of that file, or to its path.
+              In a Codespace, add it as a Codespaces secret and restart the codespace; secrets only
+              reach a codespace when it starts.
+            </li>
+            <li>
+              Restart the backend (<code>sortify ui</code>) from a terminal where the variable is
+              set.
             </li>
           </ol>
           <div className="dialog-actions">

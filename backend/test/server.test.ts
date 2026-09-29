@@ -1,13 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { JobView, PlaylistDetail, PreviewResponse, RunDetail } from "../src/api/types.ts";
-import { loadConfig } from "../src/config.ts";
 import { Store } from "../src/db.ts";
 import { type AppDeps, createApp, type YouTubeApi } from "../src/server/app.ts";
+import { PendingAuthStore } from "../src/youtube/auth.ts";
+import { tempDir, testConfig } from "./helpers.ts";
 
 class FakeYouTube implements YouTubeApi {
   quotaUsed = 0;
@@ -66,18 +66,20 @@ async function setup(overrides: Partial<AppDeps> = {}) {
   }
   const yt = new FakeYouTube();
   const calls: string[] = [];
+  let signIns = 0;
   const app = createApp({
-    config: { ...loadConfig({}), discogsToken: "t", lastfmApiKey: undefined },
+    config: { ...testConfig(), discogsToken: "t", lastfmApiKey: undefined },
     store,
     youtube: () => yt,
     port: 4747,
     auth: {
-      state: () => ({ hasClientSecrets: true, signedIn: false }),
+      state: () => ({ clientSecretsError: null, signedIn: false }),
       begin: async (_config, redirectUri) => {
         calls.push(`begin ${redirectUri}`);
+        signIns++;
         return {
           url: "https://accounts.google.com/x",
-          state: "s1",
+          state: `s${signIns}`,
           codeVerifier: "v",
           redirectUri,
         };
@@ -261,11 +263,38 @@ describe("sign-in", () => {
     expect(ok.status).toBe(200);
     expect(calls).toContain("finish c2");
   });
+
+  it("accepts any recent sign-in, not just the latest, and each only once", async () => {
+    const { api, calls } = await setup();
+    await api("/api/auth/start", { method: "POST" }); // s1
+    await api("/api/auth/start", { method: "POST" }); // s2: clicked twice
+    const complete = (state: string) =>
+      api<{ error?: string }>("/api/auth/complete", {
+        method: "POST",
+        body: { url: `http://127.0.0.1:4747/?code=c-${state}&state=${state}` },
+      });
+    expect((await complete("s1")).status).toBe(200);
+    expect(calls).toContain("finish c-s1");
+    const reused = await complete("s1");
+    expect(reused.status).toBe(400);
+    expect(reused.body.error).toMatch(/already used/);
+  });
+
+  it("explains access_denied (account not a test user)", async () => {
+    const { api } = await setup();
+    await api("/api/auth/start", { method: "POST" });
+    const res = await api<{ error: string }>("/api/auth/complete", {
+      method: "POST",
+      body: { url: "http://127.0.0.1:4747/?error=access_denied&state=s1" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Test users/);
+  });
 });
 
 describe("static files", () => {
   it("serves the built UI with a single-page fallback and no path traversal", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "sortify-web-"));
+    const dir = tempDir();
     mkdirSync(join(dir, "assets"));
     writeFileSync(join(dir, "index.html"), "<!doctype html><title>Sortify</title>");
     writeFileSync(join(dir, "assets", "app.js"), "console.log(1)");
@@ -276,5 +305,25 @@ describe("static files", () => {
     const asset = await fetch(`${base}/assets/app.js`);
     expect(asset.headers.get("content-type")).toMatch(/javascript/);
     expect(await rawRequest(base, "/..%2F..%2Fetc%2Fpasswd", { host: "localhost" })).toBe(403);
+  });
+});
+
+describe("PendingAuthStore", () => {
+  const pending = (state: string) => ({ url: "u", state, codeVerifier: "v", redirectUri: "r" });
+
+  it("survives a server restart via its file", () => {
+    const file = join(tempDir(), "pending.json");
+    new PendingAuthStore(file).add(pending("a"));
+    const afterRestart = new PendingAuthStore(file);
+    expect(afterRestart.take("a")?.state).toBe("a");
+    expect(afterRestart.take("a")).toBeUndefined();
+  });
+
+  it("forgets sign-ins after 15 minutes", () => {
+    const store = new PendingAuthStore(join(tempDir(), "pending.json"));
+    store.add(pending("old"), 0);
+    store.add(pending("new"), 10 * 60_000);
+    expect(store.take("old", 16 * 60_000)).toBeUndefined();
+    expect(store.take("new", 16 * 60_000)?.state).toBe("new");
   });
 });

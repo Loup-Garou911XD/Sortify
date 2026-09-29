@@ -28,6 +28,8 @@ npm run typecheck              # tsc in each workspace
 npm run build                  # frontend → frontend/dist, backend → backend/dist
 ```
 
+The backend loads a git-ignored repo-root `.env` (`backend/src/env.ts`, which must stay the first import in `cli.ts`; see `.env.example`), so settings reach the server however it is started. Real environment variables win over `.env`. Tests build configs with `testConfig()` from `backend/test/helpers.ts`, which sandboxes every config and data directory.
+
 Requires Node ≥ 24: the backend uses the built-in `node:sqlite` module and runs `.ts` files directly. Because of type stripping, `backend/tsconfig.json` sets `erasableSyntaxOnly`: no enums, namespaces or constructor parameter properties. Relative imports use `.ts` extensions (rewritten to `.js` on build).
 
 ## Architecture

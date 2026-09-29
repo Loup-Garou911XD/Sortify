@@ -32,6 +32,10 @@ export SORTIFY_CLIENT_SECRETS=/path/to/client_secret.json
 sortify auth
 ```
 
+The easiest place for this and the API keys below is a `.env` file in the repo root (copy `.env.example`; it is git-ignored). The backend reads it however it is started, including from the VS Code tasks, which don't see variables exported in your terminal. Variables already set in the environment take precedence.
+
+`SORTIFY_CLIENT_SECRETS` can also hold the JSON itself instead of a path, which suits a GitHub Codespaces secret. Codespaces secrets only reach a codespace when it starts, so restart the codespace after adding one.
+
 In testing mode Google expires the sign-in after 7 days; run `sortify auth` again when that happens.
 
 ### 2. Metadata API keys (recommended)
