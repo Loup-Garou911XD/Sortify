@@ -1,2 +1,92 @@
 # Sortify
 An automated playlist management tool that ingests large, mixed-bag YouTube music playlists and intelligently organizes the tracks into focused sub-playlists based on genre, mood, or song type.
+
+Sortify is a command-line tool. It reads a YouTube or YouTube Music playlist, tags every track with detailed subgenres (from Discogs styles), moods (from Last.fm tags) and song type (live, remix, cover, acoustic, …), previews the split, and only then creates the new playlists in your account. No AI or LLM is involved: every tag comes from a public music database or a simple rule.
+
+## Requirements
+
+- Node.js 24 or newer
+- A Google Cloud project with the **YouTube Data API v3** enabled
+- Optional but recommended: a Discogs token and a Last.fm API key
+
+## Setup
+
+```sh
+npm install
+npm run build        # or run from source with `npm run sortify -- <command>`
+```
+
+### 1. Google OAuth client (required)
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable **YouTube Data API v3**.
+2. Configure the OAuth consent screen (External, testing mode is fine) and add your Google account as a test user.
+3. Create an **OAuth client ID** of type **Desktop app** and download its JSON file.
+4. Point Sortify at it and sign in:
+
+```sh
+export SORTIFY_CLIENT_SECRETS=/path/to/client_secret.json
+sortify auth
+```
+
+In testing mode Google expires the sign-in after 7 days; run `sortify auth` again when that happens.
+
+### 2. Metadata API keys (recommended)
+
+| Variable | Where to get it | Used for |
+| --- | --- | --- |
+| `DISCOGS_TOKEN` | Discogs → Settings → Developers → *Generate new token* | Subgenres (main source) |
+| `LASTFM_API_KEY` | [last.fm/api/account/create](https://www.last.fm/api/account/create) | Moods, and subgenres when Discogs has none |
+
+MusicBrainz needs no key. Without Discogs and Last.fm, most tracks end up in *Unsorted*.
+
+## Usage
+
+```sh
+sortify fetch "https://music.youtube.com/playlist?list=PL..."   # read the playlist (cheap on quota)
+sortify enrich PL...                                            # tag tracks; resumable, cached
+sortify plan PL... --by subgenre --min-size 5                   # preview; writes nothing
+sortify apply <run-id>                                          # create playlists (asks first)
+sortify status [run-id]                                         # progress of runs
+```
+
+- `--by` is `subgenre`, `mood` or `type`. A track goes into **every** group it matches; `--max-groups N` caps that.
+- Groups smaller than `--min-size` are dropped. Tracks left without a group go to *Other*, tracks with no tags at all to *Unsorted* (`--no-leftovers` skips both).
+- `enrich --max-api-calls N` and `apply --max-writes N` limit a single run. Run the same command again to continue.
+- `apply` creates **private** playlists by default (`--privacy unlisted|public`), and `--dry-run` shows what it would do.
+
+### YouTube quota
+
+The default quota is 10,000 units a day. Adding a track or creating a playlist costs 50 units, so about 200 writes fit in a day. `plan` prints how many days a run will take. When the quota runs out, `apply` stops cleanly, and running `sortify apply <run-id>` again after the daily reset (midnight Pacific time) continues without creating duplicates. For large playlists, request a quota increase in Google Cloud Console.
+
+### Customising the labels
+
+The built-in subgenre and mood lists live in `src/tagging/defaultTagMap.ts`. To change them without editing code, create `~/.config/sortify/tag_map.yaml` with any of the sections `families`, `subgenres` and `moods`. Each section you include replaces the built-in one:
+
+```yaml
+moods:
+  Chill: [chillout, relaxing, mellow]
+  Workout: [gym, workout, running, pump up]
+```
+
+### Other settings
+
+| Variable | Default |
+| --- | --- |
+| `SORTIFY_HOME` | `~/.local/share/sortify` (holds `sortify.db`) |
+| `SORTIFY_DB` | `$SORTIFY_HOME/sortify.db` |
+| `SORTIFY_TAG_MAP` | `~/.config/sortify/tag_map.yaml` |
+| `SORTIFY_DAILY_QUOTA` | `10000` |
+| `SORTIFY_CONTACT` | project URL; sent to MusicBrainz in the User-Agent, as their API asks |
+
+## Development
+
+```sh
+npm test             # vitest
+npm run lint         # biome
+npm run typecheck    # tsc
+npm run format       # biome --write
+```
+
+## License
+
+GPL-3.0-or-later
