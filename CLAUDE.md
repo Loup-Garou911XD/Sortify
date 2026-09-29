@@ -8,7 +8,7 @@ npm workspaces in one repo:
 
 - `backend/` (package `sortify`): the CLI, the local API server, all domain logic, and the tests. Source is in `backend/src`, tests in `backend/test`.
 - `frontend/` (package `@sortify/frontend`): the React 19 + Vite web UI. It builds to `frontend/dist`, which the backend serves (override with `SORTIFY_UI_DIR`).
-- Root: shared tooling (Biome, CI), `scripts/dev.mjs`, and scripts that run both packages.
+- Root: shared tooling (Biome, CI, `.vscode/tasks.json`) and scripts that run both packages.
 
 ## Commands
 
@@ -16,7 +16,9 @@ Run from the repo root:
 
 ```sh
 npm install                    # installs both workspaces
-npm run dev                    # backend `sortify ui` (restarts on backend/src changes) + Vite hot reload on :5173
+npm run dev:backend            # `sortify ui` on :4747, restarts on backend/src changes
+npm run dev:frontend           # Vite on :5173 with hot reload, proxies /api to :4747
+                               # (in VS Code, Ctrl+Shift+B starts both in separate terminals)
 npm run -s sortify -- <command>   # the CLI from source, e.g. `npm run -s sortify -- ui`
 npm test                       # backend tests (vitest)
 npm test -w backend -- test/planner.test.ts                # one file

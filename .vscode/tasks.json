@@ -1,0 +1,97 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev",
+      "detail": "Ctrl+Shift+B: backend and frontend dev servers, each in its own terminal",
+      "dependsOn": ["Backend", "Frontend"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend",
+      "detail": "sortify ui on :4747, restarts when backend/src changes",
+      "type": "shell",
+      "command": "npm run dev -w backend",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "sortify-backend",
+        "pattern": { "regexp": "^__never_matches__$" },
+        "background": {
+          "activeBegins": true,
+          "beginsPattern": "Restarting",
+          "endsPattern": "Sortify is running at"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "showReuseMessage": false }
+    },
+    {
+      "label": "Frontend",
+      "detail": "Vite on :5173 with hot reload; proxies /api to the backend",
+      "type": "shell",
+      "command": "npm run dev -w frontend",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "sortify-frontend",
+        "pattern": { "regexp": "^__never_matches__$" },
+        "background": {
+          "activeBegins": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "ready in"
+        }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated", "showReuseMessage": false }
+    },
+    {
+      "label": "Build",
+      "detail": "npm run build: frontend → frontend/dist, backend → backend/dist",
+      "type": "shell",
+      "command": "npm run build",
+      "group": "build",
+      "problemMatcher": {
+        "base": "$tsc",
+        "fileLocation": ["relative", "${workspaceFolder}/backend"]
+      },
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Test",
+      "detail": "npm test: backend tests (vitest)",
+      "type": "shell",
+      "command": "npm test",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "Typecheck",
+      "detail": "tsc in backend and frontend",
+      "dependsOn": ["Typecheck: backend", "Typecheck: frontend"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Typecheck: backend",
+      "type": "shell",
+      "command": "npx tsc --noEmit -p backend",
+      "problemMatcher": "$tsc",
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "Typecheck: frontend",
+      "type": "shell",
+      "command": "npx tsc --noEmit -p frontend",
+      "problemMatcher": "$tsc",
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "Lint",
+      "detail": "biome check (both workspaces)",
+      "type": "shell",
+      "command": "npm run lint",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    }
+  ]
+}

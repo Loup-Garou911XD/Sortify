@@ -95,7 +95,9 @@ moods:
 ## Development
 
 ```sh
-npm run dev          # backend + frontend with hot reload (UI on http://localhost:5173)
+npm run dev:backend  # API server, restarts on changes (run in one terminal)
+npm run dev:frontend # UI with hot reload on http://localhost:5173 (run in another)
+                     # in VS Code, Ctrl+Shift+B starts both
 npm test             # backend tests (vitest)
 npm run lint         # biome
 npm run typecheck    # tsc, both workspaces

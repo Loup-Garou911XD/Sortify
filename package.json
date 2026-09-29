@@ -12,7 +12,8 @@
     "frontend"
   ],
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
     "sortify": "npm run -s sortify -w backend --",
     "build": "npm run build -w frontend && npm run build -w backend",
     "typecheck": "npm run typecheck --workspaces",
