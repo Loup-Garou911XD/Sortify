@@ -15,8 +15,8 @@ export interface Config {
   clientSecrets: ClientSecretsSource | undefined;
   /** Optional user override for the built-in subgenre/mood lists. */
   tagMapPath: string;
-  discogsToken: string | undefined;
-  lastfmApiKey: string | undefined;
+  /** The environment the config was read from; tagging providers read their own API keys here. */
+  env: NodeJS.ProcessEnv;
   /** MusicBrainz rejects requests without an identifying User-Agent. */
   userAgent: string;
   /** YouTube Data API units per day (default project quota is 10,000). */
@@ -50,8 +50,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         ? { json: secrets }
         : { path: resolve(env.INIT_CWD ?? process.cwd(), secrets) },
     tagMapPath: path(env.SORTIFY_TAG_MAP) ?? join(configDir, "tag_map.yaml"),
-    discogsToken: env.DISCOGS_TOKEN || undefined,
-    lastfmApiKey: env.LASTFM_API_KEY || undefined,
+    env,
     userAgent: `Sortify/${VERSION} ( ${contact} )`,
     dailyQuota: Number.isFinite(dailyQuota) && dailyQuota > 0 ? dailyQuota : 10_000,
   };

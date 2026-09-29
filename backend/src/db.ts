@@ -1,11 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
+import type { Dimension, TagSource } from "./api/types.ts";
 
-export type Dimension = "subgenre" | "mood" | "type";
+export type { Dimension, TagSource };
 export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
-
-export type TagSource = "rule" | "musicbrainz" | "discogs" | "lastfm";
 
 export interface Track {
   videoId: string;
@@ -14,8 +13,8 @@ export interface Track {
   durationS: number | null;
   artist: string | null;
   songTitle: string | null;
-  mbid: string | null;
-  discogsId: string | null;
+  /** Provider id → that provider's id for the track, e.g. { musicbrainz: "<MBID>" }. */
+  externalIds: Record<string, string>;
   enrichedAt: string | null;
 }
 
@@ -86,8 +85,7 @@ CREATE TABLE IF NOT EXISTS tracks (
   duration_s  INTEGER,
   artist      TEXT,
   song_title  TEXT,
-  mbid        TEXT,
-  discogs_id  TEXT,
+  external_ids TEXT,
   enriched_at TEXT
 );
 CREATE TABLE IF NOT EXISTS playlists (
@@ -144,7 +142,7 @@ CREATE TABLE IF NOT EXISTS run_items (
 `;
 
 const TRACK_COLUMNS = `t.video_id AS videoId, t.title, t.channel, t.duration_s AS durationS,
-  t.artist, t.song_title AS songTitle, t.mbid, t.discogs_id AS discogsId, t.enriched_at AS enrichedAt`;
+  t.artist, t.song_title AS songTitle, t.external_ids AS externalIds, t.enriched_at AS enrichedAt`;
 
 const RUN_COLUMNS = `run_id AS runId, source_playlist_id AS sourcePlaylistId, dimension,
   min_size AS minSize, created_at AS createdAt, status, quota_used AS quotaUsed,
@@ -155,12 +153,48 @@ const now = (): string => new Date().toISOString();
 /** Thin typed layer over the SQLite cache. Every stage reads and writes through it. */
 export class Store {
   readonly db: DatabaseSync;
+  private readonly statements = new Map<string, StatementSync>();
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
-    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    // NORMAL is safe with WAL and avoids an fsync on every small cache write.
+    this.db.exec(
+      "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;",
+    );
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** node:sqlite does not cache prepared statements, so reuse them per SQL string. */
+  private prep(sql: string): StatementSync {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql);
+      this.statements.set(sql, statement);
+    }
+    return statement;
+  }
+
+  /** Brings databases created by older versions up to the current schema. */
+  private migrate(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[]).map((c) => c.name),
+    );
+    if (columns.has("external_ids")) return;
+    // Per-provider id columns became one JSON map, so new providers need no schema change.
+    this.tx(() => {
+      this.db.exec("ALTER TABLE tracks ADD COLUMN external_ids TEXT");
+      if (!columns.has("mbid")) return;
+      this.db.exec(`
+        UPDATE tracks SET external_ids = (
+          SELECT json_group_object(k, v) FROM (
+            SELECT 'musicbrainz' AS k, mbid AS v WHERE mbid IS NOT NULL
+            UNION ALL SELECT 'discogs', discogs_id WHERE discogs_id IS NOT NULL))
+        WHERE mbid IS NOT NULL OR discogs_id IS NOT NULL;
+        ALTER TABLE tracks DROP COLUMN mbid;
+        ALTER TABLE tracks DROP COLUMN discogs_id;`);
+    });
   }
 
   close(): void {
@@ -187,18 +221,16 @@ export class Store {
     items: { videoId: string; title: string; channel: string }[],
   ): void {
     this.tx(() => {
-      this.db
-        .prepare(
-          `INSERT INTO playlists (playlist_id, title, fetched_at) VALUES (?, ?, ?)
+      this.prep(
+        `INSERT INTO playlists (playlist_id, title, fetched_at) VALUES (?, ?, ?)
            ON CONFLICT (playlist_id) DO UPDATE SET title = excluded.title, fetched_at = excluded.fetched_at`,
-        )
-        .run(playlistId, title, now());
-      this.db.prepare("DELETE FROM playlist_items WHERE playlist_id = ?").run(playlistId);
-      const upsertTrack = this.db.prepare(
+      ).run(playlistId, title, now());
+      this.prep("DELETE FROM playlist_items WHERE playlist_id = ?").run(playlistId);
+      const upsertTrack = this.prep(
         `INSERT INTO tracks (video_id, title, channel) VALUES (?, ?, ?)
          ON CONFLICT (video_id) DO UPDATE SET title = excluded.title, channel = excluded.channel`,
       );
-      const addItem = this.db.prepare(
+      const addItem = this.prep(
         "INSERT OR IGNORE INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)",
       );
       items.forEach((item, position) => {
@@ -209,35 +241,32 @@ export class Store {
   }
 
   getPlaylist(playlistId: string): { playlistId: string; title: string } | undefined {
-    return this.db
-      .prepare("SELECT playlist_id AS playlistId, title FROM playlists WHERE playlist_id = ?")
-      .get(playlistId) as { playlistId: string; title: string } | undefined;
+    return this.prep(
+      "SELECT playlist_id AS playlistId, title FROM playlists WHERE playlist_id = ?",
+    ).get(playlistId) as { playlistId: string; title: string } | undefined;
   }
 
   playlistTracks(playlistId: string): Track[] {
-    return this.db
-      .prepare(
-        `SELECT ${TRACK_COLUMNS} FROM tracks t
-         JOIN playlist_items p ON p.video_id = t.video_id
-         WHERE p.playlist_id = ? ORDER BY p.position`,
-      )
-      .all(playlistId) as unknown as Track[];
+    const rows = this.prep(
+      `SELECT ${TRACK_COLUMNS} FROM tracks t
+       JOIN playlist_items p ON p.video_id = t.video_id
+       WHERE p.playlist_id = ? ORDER BY p.position`,
+    ).all(playlistId) as unknown as (Omit<Track, "externalIds"> & { externalIds: string | null })[];
+    return rows.map((r) => ({ ...r, externalIds: r.externalIds ? JSON.parse(r.externalIds) : {} }));
   }
 
   videoIdsMissingDuration(playlistId: string): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT t.video_id AS videoId FROM tracks t
+    const rows = this.prep(
+      `SELECT t.video_id AS videoId FROM tracks t
          JOIN playlist_items p ON p.video_id = t.video_id
          WHERE p.playlist_id = ? AND t.duration_s IS NULL ORDER BY p.position`,
-      )
-      .all(playlistId) as { videoId: string }[];
+    ).all(playlistId) as { videoId: string }[];
     return rows.map((r) => r.videoId);
   }
 
   setDurations(durations: Map<string, number>): void {
     this.tx(() => {
-      const stmt = this.db.prepare("UPDATE tracks SET duration_s = ? WHERE video_id = ?");
+      const stmt = this.prep("UPDATE tracks SET duration_s = ? WHERE video_id = ?");
       for (const [videoId, seconds] of durations) stmt.run(seconds, videoId);
     });
   }
@@ -249,20 +278,17 @@ export class Store {
     meta: {
       artist: string | null;
       songTitle: string | null;
-      mbid: string | null;
-      discogsId: string | null;
+      externalIds: Record<string, string>;
     },
     tags: Tag[],
   ): void {
     this.tx(() => {
-      this.db
-        .prepare(
-          `UPDATE tracks SET artist = ?, song_title = ?, mbid = ?, discogs_id = ?, enriched_at = ?
+      this.prep(
+        `UPDATE tracks SET artist = ?, song_title = ?, external_ids = ?, enriched_at = ?
            WHERE video_id = ?`,
-        )
-        .run(meta.artist, meta.songTitle, meta.mbid, meta.discogsId, now(), videoId);
-      this.db.prepare("DELETE FROM track_tags WHERE video_id = ?").run(videoId);
-      const insert = this.db.prepare(
+      ).run(meta.artist, meta.songTitle, JSON.stringify(meta.externalIds), now(), videoId);
+      this.prep("DELETE FROM track_tags WHERE video_id = ?").run(videoId);
+      const insert = this.prep(
         `INSERT INTO track_tags (video_id, dimension, value, raw_tag, source, weight)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT DO UPDATE SET weight = max(weight, excluded.weight)`,
@@ -272,29 +298,26 @@ export class Store {
   }
 
   playlistTags(playlistId: string, dimension: Dimension): TrackTag[] {
-    return this.db
-      .prepare(
-        `SELECT g.video_id AS videoId, g.dimension, g.value, g.raw_tag AS rawTag, g.source, g.weight
+    return this.prep(
+      `SELECT g.video_id AS videoId, g.dimension, g.value, g.raw_tag AS rawTag, g.source, g.weight
          FROM track_tags g JOIN playlist_items p ON p.video_id = g.video_id
          WHERE p.playlist_id = ? AND g.dimension = ?`,
-      )
-      .all(playlistId, dimension) as unknown as TrackTag[];
+    ).all(playlistId, dimension) as unknown as TrackTag[];
   }
 
   cacheGet(source: string, key: string): unknown {
-    const row = this.db
-      .prepare("SELECT body FROM lookup_cache WHERE source = ? AND key = ?")
-      .get(source, key) as { body: string } | undefined;
+    const row = this.prep("SELECT body FROM lookup_cache WHERE source = ? AND key = ?").get(
+      source,
+      key,
+    ) as { body: string } | undefined;
     return row === undefined ? undefined : JSON.parse(row.body);
   }
 
   cachePut(source: string, key: string, body: unknown): void {
-    this.db
-      .prepare(
-        `INSERT INTO lookup_cache (source, key, body, fetched_at) VALUES (?, ?, ?, ?)
+    this.prep(
+      `INSERT INTO lookup_cache (source, key, body, fetched_at) VALUES (?, ?, ?, ?)
          ON CONFLICT (source, key) DO UPDATE SET body = excluded.body, fetched_at = excluded.fetched_at`,
-      )
-      .run(source, key, JSON.stringify(body), now());
+    ).run(source, key, JSON.stringify(body), now());
   }
 
   // --- runs -------------------------------------------------------------------
@@ -306,15 +329,13 @@ export class Store {
     groups: PlannedGroup[],
   ): number {
     return this.tx(() => {
-      const { lastInsertRowid } = this.db
-        .prepare(
-          `INSERT INTO runs (source_playlist_id, dimension, min_size, created_at, status)
+      const { lastInsertRowid } = this.prep(
+        `INSERT INTO runs (source_playlist_id, dimension, min_size, created_at, status)
            VALUES (?, ?, ?, ?, 'planned')`,
-        )
-        .run(sourcePlaylistId, dimension, minSize, now());
+      ).run(sourcePlaylistId, dimension, minSize, now());
       const runId = Number(lastInsertRowid);
-      const addGroup = this.db.prepare("INSERT INTO run_groups (run_id, name) VALUES (?, ?)");
-      const addItem = this.db.prepare(
+      const addGroup = this.prep("INSERT INTO run_groups (run_id, name) VALUES (?, ?)");
+      const addItem = this.prep(
         "INSERT INTO run_items (group_id, video_id, position) VALUES (?, ?, ?)",
       );
       for (const group of groups) {
@@ -328,66 +349,61 @@ export class Store {
   }
 
   getRun(runId: number): Run | undefined {
-    return this.db.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE run_id = ?`).get(runId) as
+    return this.prep(`SELECT ${RUN_COLUMNS} FROM runs WHERE run_id = ?`).get(runId) as
       | Run
       | undefined;
   }
 
   listRuns(): Run[] {
-    return this.db
-      .prepare(`SELECT ${RUN_COLUMNS} FROM runs ORDER BY run_id DESC`)
-      .all() as unknown as Run[];
+    return this.prep(
+      `SELECT ${RUN_COLUMNS} FROM runs ORDER BY run_id DESC`,
+    ).all() as unknown as Run[];
   }
 
   updateRun(
     runId: number,
     patch: { status?: RunStatus; quotaDelta?: number; writesDelta?: number },
   ): void {
-    this.db
-      .prepare(
-        `UPDATE runs SET status = coalesce(?, status), quota_used = quota_used + ?,
+    this.prep(
+      `UPDATE runs SET status = coalesce(?, status), quota_used = quota_used + ?,
          writes_done = writes_done + ? WHERE run_id = ?`,
-      )
-      .run(patch.status ?? null, patch.quotaDelta ?? 0, patch.writesDelta ?? 0, runId);
+    ).run(patch.status ?? null, patch.quotaDelta ?? 0, patch.writesDelta ?? 0, runId);
   }
 
   runGroups(runId: number): RunGroup[] {
-    return this.db
-      .prepare(
-        `SELECT group_id AS groupId, run_id AS runId, name, target_playlist_id AS targetPlaylistId
+    return this.prep(
+      `SELECT group_id AS groupId, run_id AS runId, name, target_playlist_id AS targetPlaylistId
          FROM run_groups WHERE run_id = ? ORDER BY group_id`,
-      )
-      .all(runId) as unknown as RunGroup[];
+    ).all(runId) as unknown as RunGroup[];
   }
 
   groupItems(groupId: number): RunItem[] {
-    const rows = this.db
-      .prepare(
-        `SELECT group_id AS groupId, video_id AS videoId, position, written
+    const rows = this.prep(
+      `SELECT group_id AS groupId, video_id AS videoId, position, written
          FROM run_items WHERE group_id = ? ORDER BY position`,
-      )
-      .all(groupId) as { groupId: number; videoId: string; position: number; written: number }[];
+    ).all(groupId) as { groupId: number; videoId: string; position: number; written: number }[];
     return rows.map((r) => ({ ...r, written: r.written === 1 }));
   }
 
   setGroupTarget(groupId: number, playlistId: string): void {
-    this.db
-      .prepare("UPDATE run_groups SET target_playlist_id = ? WHERE group_id = ?")
-      .run(playlistId, groupId);
+    this.prep("UPDATE run_groups SET target_playlist_id = ? WHERE group_id = ?").run(
+      playlistId,
+      groupId,
+    );
   }
 
   markWritten(groupId: number, videoId: string): void {
-    this.db
-      .prepare("UPDATE run_items SET written = 1 WHERE group_id = ? AND video_id = ?")
-      .run(groupId, videoId);
+    this.prep("UPDATE run_items SET written = 1 WHERE group_id = ? AND video_id = ?").run(
+      groupId,
+      videoId,
+    );
   }
 
   // --- summaries for the web UI ------------------------------------------------
 
   listPlaylists(): PlaylistSummary[] {
-    return this.db
-      .prepare(
-        `SELECT p.playlist_id AS playlistId, p.title, p.fetched_at AS fetchedAt,
+    return this.prep(
+      `SELECT p.playlist_id AS playlistId, p.title, p.fetched_at AS fetchedAt,
            COUNT(i.video_id) AS total,
            COALESCE(SUM(t.enriched_at IS NOT NULL), 0) AS enriched,
            COALESCE(SUM(EXISTS (SELECT 1 FROM track_tags g
@@ -399,45 +415,38 @@ export class Store {
          LEFT JOIN tracks t ON t.video_id = i.video_id
          GROUP BY p.playlist_id
          ORDER BY p.fetched_at DESC`,
-      )
-      .all() as unknown as PlaylistSummary[];
+    ).all() as unknown as PlaylistSummary[];
   }
 
   playlistAllTags(playlistId: string): TrackTag[] {
-    return this.db
-      .prepare(
-        `SELECT g.video_id AS videoId, g.dimension, g.value, g.raw_tag AS rawTag, g.source, g.weight
+    return this.prep(
+      `SELECT g.video_id AS videoId, g.dimension, g.value, g.raw_tag AS rawTag, g.source, g.weight
          FROM track_tags g JOIN playlist_items p ON p.video_id = g.video_id
          WHERE p.playlist_id = ?
          ORDER BY g.weight DESC`,
-      )
-      .all(playlistId) as unknown as TrackTag[];
+    ).all(playlistId) as unknown as TrackTag[];
   }
 
   runGroupProgress(runId: number): RunGroupProgress[] {
-    return this.db
-      .prepare(
-        `SELECT g.group_id AS groupId, g.run_id AS runId, g.name,
+    return this.prep(
+      `SELECT g.group_id AS groupId, g.run_id AS runId, g.name,
            g.target_playlist_id AS targetPlaylistId,
            COUNT(i.video_id) AS total, COALESCE(SUM(i.written), 0) AS written
          FROM run_groups g LEFT JOIN run_items i ON i.group_id = g.group_id
          WHERE g.run_id = ?
          GROUP BY g.group_id
          ORDER BY g.group_id`,
-      )
-      .all(runId) as unknown as RunGroupProgress[];
+    ).all(runId) as unknown as RunGroupProgress[];
   }
 
   /** Removes a run and its groups. Callers must only do this for runs never applied. */
   deleteRun(runId: number): void {
     this.tx(() => {
-      this.db
-        .prepare(
-          "DELETE FROM run_items WHERE group_id IN (SELECT group_id FROM run_groups WHERE run_id = ?)",
-        )
-        .run(runId);
-      this.db.prepare("DELETE FROM run_groups WHERE run_id = ?").run(runId);
-      this.db.prepare("DELETE FROM runs WHERE run_id = ?").run(runId);
+      this.prep(
+        "DELETE FROM run_items WHERE group_id IN (SELECT group_id FROM run_groups WHERE run_id = ?)",
+      ).run(runId);
+      this.prep("DELETE FROM run_groups WHERE run_id = ?").run(runId);
+      this.prep("DELETE FROM runs WHERE run_id = ?").run(runId);
     });
   }
 }

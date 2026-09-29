@@ -1,10 +1,8 @@
 import type { Config } from "./config.ts";
 import type { Store } from "./db.ts";
-import { Discogs } from "./enrich/discogs.ts";
-import { LastFm } from "./enrich/lastfm.ts";
 import { Budget, type LookupDeps } from "./enrich/lookup.ts";
-import { MusicBrainz } from "./enrich/musicbrainz.ts";
 import type { Enrichers } from "./enrich/pipeline.ts";
+import { createProviderClients } from "./enrich/providers.ts";
 import { loadTagMap, TagMapper } from "./tagging/mapper.ts";
 import { loadAuthClient } from "./youtube/auth.ts";
 import { YouTubeClient } from "./youtube/client.ts";
@@ -49,11 +47,11 @@ export async function fetchPlaylist(
   };
 }
 
-/** The enrichment sources the current configuration allows, sharing one API budget. */
+/** Clients for every configured tagging provider (minus `skip`), sharing one API budget. */
 export function createEnrichers(
   config: Config,
   store: Store,
-  options: { maxApiCalls?: number; musicbrainz?: boolean } = {},
+  options: { maxApiCalls?: number; skip?: readonly string[] } = {},
 ): { enrichers: Enrichers; budget: Budget } {
   const budget = new Budget(options.maxApiCalls);
   const deps: LookupDeps = { store, budget, userAgent: config.userAgent };
@@ -61,9 +59,7 @@ export function createEnrichers(
     budget,
     enrichers: {
       mapper: new TagMapper(loadTagMap(config.tagMapPath)),
-      musicbrainz: options.musicbrainz === false ? undefined : new MusicBrainz(deps),
-      discogs: config.discogsToken ? new Discogs(deps, config.discogsToken) : undefined,
-      lastfm: config.lastfmApiKey ? new LastFm(deps, config.lastfmApiKey) : undefined,
+      clients: createProviderClients(deps, config.env, options.skip),
     },
   };
 }

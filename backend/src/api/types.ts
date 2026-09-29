@@ -4,7 +4,8 @@
  */
 
 export type Dimension = "subgenre" | "mood" | "type";
-export type TagSource = "rule" | "musicbrainz" | "discogs" | "lastfm";
+/** Where a tag came from: "rule" (title rules) or a provider id (see ProviderStatus). */
+export type TagSource = string;
 export type RunStatus = "planned" | "applying" | "paused" | "done";
 export type Privacy = "private" | "unlisted" | "public";
 
@@ -14,8 +15,19 @@ export interface StatusResponse {
   /** Why the OAuth client could not be loaded (unset, missing file, invalid JSON). */
   clientSecretsError: string | null;
   signedIn: boolean;
-  sources: { musicbrainz: boolean; discogs: boolean; lastfm: boolean };
+  /** Tagging providers in the order they are asked, from the backend's provider registry. */
+  sources: ProviderStatus[];
   dailyQuota: number;
+}
+
+export interface ProviderStatus {
+  id: string;
+  label: string;
+  /** What it contributes, e.g. "The only mood source". */
+  help: string;
+  /** Environment variables it needs (API keys); empty when it needs none. */
+  envVars: string[];
+  configured: boolean;
 }
 
 export interface PlaylistSummary {

@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/db.ts";
-import { Discogs } from "../src/enrich/discogs.ts";
+import { Discogs, pickResult } from "../src/enrich/discogs.ts";
 import { LastFm } from "../src/enrich/lastfm.ts";
-import { Budget, type FetchLike, type LookupDeps } from "../src/enrich/lookup.ts";
+import {
+  Budget,
+  type FetchLike,
+  type LookupDeps,
+  RateLimiter,
+  ServiceClient,
+} from "../src/enrich/lookup.ts";
 import { MusicBrainz } from "../src/enrich/musicbrainz.ts";
-import { enrichPlaylist } from "../src/enrich/pipeline.ts";
+import { type Enrichers, enrichPlaylist } from "../src/enrich/pipeline.ts";
+import type { ProviderClient } from "../src/enrich/provider.ts";
+import { createProviderClients, providerStatuses } from "../src/enrich/providers.ts";
 import { TagMapper } from "../src/tagging/mapper.ts";
 
 const json = (body: unknown, status = 200): Response =>
@@ -15,7 +23,7 @@ function fakeApis(): { fetch: FetchLike; calls: string[] } {
   const calls: string[] = [];
   const fetch: FetchLike = async (input) => {
     const url = new URL(input);
-    calls.push(url.hostname);
+    calls.push(input);
     if (url.hostname === "musicbrainz.org") {
       const query = url.searchParams.get("query") ?? "";
       if (!query.toLowerCase().includes("get lucky")) return json({ recordings: [] });
@@ -88,11 +96,9 @@ function setup(budgetLimit?: number) {
     fetch,
     sleep: async () => {},
   };
-  const enrichers = {
+  const enrichers: Enrichers = {
     mapper: new TagMapper(),
-    musicbrainz: new MusicBrainz(deps),
-    discogs: new Discogs(deps, "token"),
-    lastfm: new LastFm(deps, "key"),
+    clients: [new MusicBrainz(deps), new Discogs(deps, "token"), new LastFm(deps, "key")],
   };
   store.savePlaylist("PL1", "Mix", [
     { videoId: "v1", title: "Daft Punk - Get Lucky (Official Video)", channel: "DaftPunkVEVO" },
@@ -117,8 +123,7 @@ describe("enrichPlaylist", () => {
     expect(lucky).toMatchObject({
       artist: "Daft Punk feat. Pharrell Williams",
       songTitle: "Get Lucky",
-      mbid: "mb-1",
-      discogsId: "release/7",
+      externalIds: { musicbrainz: "mb-1", discogs: "release/7" },
     });
     const subgenres = store.playlistTags("PL1", "subgenre").filter((t) => t.videoId === "v1");
     expect(new Set(subgenres.map((t) => t.value))).toEqual(new Set(["Nu-Disco", "Disco"]));
@@ -149,13 +154,40 @@ describe("enrichPlaylist", () => {
   it("stops cleanly at the API budget and resumes later", async () => {
     const { store, enrichers, deps } = setup(3);
     const partial = await enrichPlaylist(store, "PL1", enrichers);
+    const untagged = () => store.playlistTracks("PL1").filter((t) => t.enrichedAt === null);
     expect(partial.stoppedByBudget).toBe(true);
-    expect(partial.remaining).toBe(3);
-    expect(store.playlistTracks("PL1").filter((t) => t.enrichedAt === null).length).toBe(3);
+    expect(partial.remaining).toBeGreaterThan(0);
+    expect(untagged().length).toBe(partial.remaining);
 
     deps.budget = new Budget();
     const rest = await enrichPlaylist(store, "PL1", enrichers);
-    expect(rest).toEqual({ enriched: 3, remaining: 0, stoppedByBudget: false, cancelled: false });
+    expect(rest).toEqual({
+      enriched: partial.remaining,
+      remaining: 0,
+      stoppedByBudget: false,
+      cancelled: false,
+    });
+    expect(untagged()).toEqual([]);
+  });
+
+  it("skips MusicBrainz for Topic tracks and searches Discogs once per track", async () => {
+    const { store, enrichers, calls } = setup();
+    await enrichPlaylist(store, "PL1", enrichers);
+    const mb = calls.filter((c) => c.includes("musicbrainz.org"));
+    expect(mb.some((c) => decodeURIComponent(c).includes("Unknown Song"))).toBe(false);
+    expect(mb).toHaveLength(2);
+    expect(calls.filter((c) => c.includes("api.discogs.com"))).toHaveLength(3);
+  });
+
+  it("stops between tracks when cancelled, keeping finished ones", async () => {
+    const { store, enrichers } = setup();
+    const controller = new AbortController();
+    const summary = await enrichPlaylist(store, "PL1", enrichers, {
+      concurrency: 1,
+      signal: controller.signal,
+      onProgress: () => controller.abort(),
+    });
+    expect(summary).toEqual({ enriched: 1, remaining: 2, stoppedByBudget: false, cancelled: true });
   });
 });
 
@@ -169,7 +201,9 @@ describe("lookup errors", () => {
       fetch: async () => json({ message: "Invalid consumer token" }, 401),
       sleep: async () => {},
     };
-    await expect(new Discogs(deps, "bad").findStyles("A", "B")).rejects.toThrow(/401/);
+    await expect(new Discogs(deps, "bad").trackTags({ artist: "A", title: "B" })).rejects.toThrow(
+      /Discogs rejected the request \(HTTP 401\)/,
+    );
   });
 
   it("retries 503s and gives up without caching", async () => {
@@ -185,8 +219,127 @@ describe("lookup errors", () => {
       },
       sleep: async () => {},
     };
-    expect(await new MusicBrainz(deps).findRecording("A", "B")).toBeNull();
+    expect(await new MusicBrainz(deps).resolve({ artist: "A", title: "B" })).toBeUndefined();
     expect(calls).toBe(3);
     expect(store.cacheGet("musicbrainz", "a\u0000b")).toBeUndefined();
+  });
+});
+
+describe("lookup plumbing", () => {
+  it("backs off every caller of a service after it says slow down", async () => {
+    const clock = 0;
+    const slept: number[] = [];
+    const limiter = new RateLimiter(
+      100,
+      async (ms) => {
+        slept.push(ms);
+      },
+      () => clock,
+    );
+    await limiter.wait();
+    limiter.penalize(2000);
+    await Promise.all([limiter.wait(), limiter.wait()]);
+    expect(slept).toEqual([2000, 2100]);
+  });
+
+  it("spaces out concurrent callers of one rate limiter", async () => {
+    let clock = 0;
+    const slept: number[] = [];
+    const limiter = new RateLimiter(
+      1000,
+      async (ms) => {
+        slept.push(ms);
+      },
+      () => clock,
+    );
+    await Promise.all([limiter.wait(), limiter.wait(), limiter.wait()]);
+    expect(slept).toEqual([1000, 2000]);
+    clock = 5000;
+    await limiter.wait();
+    expect(slept).toEqual([1000, 2000]);
+  });
+
+  it("shares one request between identical concurrent lookups", async () => {
+    let requests = 0;
+    const deps: LookupDeps = {
+      store: new Store(":memory:"),
+      budget: new Budget(),
+      userAgent: "test",
+      fetch: async () => {
+        requests++;
+        return json({ value: 42 });
+      },
+      sleep: async () => {},
+    };
+    const http = new ServiceClient(deps, { name: "Test", source: "test", intervalMs: 0 });
+    const lookup = () =>
+      http.get({
+        key: ["k"],
+        url: "https://example.test/k",
+        parse: (body) => (body as { value: number }).value,
+      });
+    expect(await Promise.all([lookup(), lookup(), lookup()])).toEqual([42, 42, 42]);
+    expect(requests).toBe(1);
+    expect(deps.budget.used).toBe(1);
+  });
+
+  it("prefers a Discogs master over a release of the same artist", () => {
+    const match = pickResult(
+      {
+        results: [
+          { id: 1, type: "release", title: "Karan Aujla - Single", style: ["Bhangra"] },
+          { id: 2, type: "artist", title: "Karan Aujla" },
+          { id: 3, type: "master", title: "Karan Aujla - Making Memories", style: ["Hip Hop"] },
+        ],
+      },
+      "Karan Aujla",
+    );
+    expect(match?.id).toBe("master/3");
+  });
+});
+
+describe("providers", () => {
+  it("plugs in any ProviderClient without touching the pipeline", async () => {
+    const store = new Store(":memory:");
+    store.savePlaylist("PL", "Mix", [
+      { videoId: "a", title: "Nightcall - Kavinsky", channel: "Kavinsky" },
+      { videoId: "b", title: "Get Lucky", channel: "Daft Punk - Topic" },
+    ]);
+    const asked: string[] = [];
+    // A stand-in for e.g. a future Spotify provider: resolves spelling, returns its own tags.
+    const spotifyLike: ProviderClient = {
+      id: "spotify",
+      skip: (parsed) => parsed.official,
+      resolve: async ({ artist, title }) => {
+        asked.push(`resolve ${title}`);
+        return { artist: artist.toUpperCase(), title, externalId: `sp:${title}` };
+      },
+      trackTags: async ({ artist }) => ({
+        genres: [{ tag: "retrowave", source: "spotify", weight: 0.9 }],
+        moods: [{ tag: "dark", source: "spotify", weight: 0.9 }],
+        externalId: `sp-artist:${artist}`,
+      }),
+    };
+    await enrichPlaylist(store, "PL", { mapper: new TagMapper(), clients: [spotifyLike] });
+
+    const [a, b] = store.playlistTracks("PL");
+    expect(a).toMatchObject({ artist: "KAVINSKY", externalIds: { spotify: "sp-artist:KAVINSKY" } });
+    expect(b?.externalIds).toEqual({});
+    expect(asked).toEqual(["resolve Nightcall"]);
+    const tags = store.playlistTags("PL", "subgenre").map((t) => [t.videoId, t.value, t.source]);
+    expect(tags).toEqual([["a", "Synthwave", "spotify"]]);
+    expect(store.playlistTags("PL", "mood").map((t) => t.value)).toEqual(["Dark"]);
+  });
+
+  it("turns providers on from their environment variables and honours --skip", () => {
+    const deps: LookupDeps = { store: new Store(":memory:"), budget: new Budget(), userAgent: "t" };
+    const env = { DISCOGS_TOKEN: "x", LASTFM_API_KEY: " " };
+    expect(providerStatuses(env).map((p) => [p.id, p.configured])).toEqual([
+      ["musicbrainz", true],
+      ["discogs", true],
+      ["lastfm", false],
+    ]);
+    expect(createProviderClients(deps, env).map((c) => c.id)).toEqual(["musicbrainz", "discogs"]);
+    expect(createProviderClients(deps, env, ["musicbrainz"]).map((c) => c.id)).toEqual(["discogs"]);
   });
 });

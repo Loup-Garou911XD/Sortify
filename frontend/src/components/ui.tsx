@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import type { Dimension, TrackTagView } from "../../../backend/src/api/types.ts";
+import { useApp } from "../App.tsx";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -49,18 +50,15 @@ export function Progress({
   );
 }
 
-const SOURCE_LABEL: Record<TrackTagView["source"], string> = {
-  rule: "title rule",
-  musicbrainz: "MusicBrainz",
-  discogs: "Discogs",
-  lastfm: "Last.fm",
-};
-
 export function TagChip({ tag }: { tag: TrackTagView }) {
+  const { status } = useApp();
+  const source =
+    status?.sources.find((s) => s.id === tag.source)?.label ??
+    (tag.source === "rule" ? "title rule" : tag.source);
   return (
     <span
       className={`chip chip-${tag.dimension}`}
-      title={`${SOURCE_LABEL[tag.source]}: “${tag.rawTag}” (weight ${tag.weight.toFixed(2)})`}
+      title={`${source}: “${tag.rawTag}” (weight ${tag.weight.toFixed(2)})`}
     >
       {tag.value}
     </span>

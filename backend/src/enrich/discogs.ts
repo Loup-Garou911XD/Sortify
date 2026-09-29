@@ -1,6 +1,8 @@
-import { cachedGet, type LookupDeps, RateLimiter } from "./lookup.ts";
+import { type LookupDeps, ServiceClient } from "./lookup.ts";
+import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
 import { similarity } from "./text.ts";
 
+/** The cached form of a search result (kept stable so existing caches stay valid). */
 export interface DiscogsMatch {
   /** "master/123" or "release/456". */
   id: string;
@@ -11,7 +13,7 @@ export interface DiscogsMatch {
 interface SearchResponse {
   results?: {
     id: number;
-    type: "master" | "release";
+    type: string;
     title: string;
     genre?: string[];
     style?: string[];
@@ -23,43 +25,60 @@ const MIN_SIMILARITY = 0.6;
 
 /**
  * Discogs database search for subgenres ("styles"). Styles belong to releases, not tracks, so
- * masters (the original release) are preferred and compilations are skipped.
+ * masters (the original release) are preferred and compilations are skipped. One search covers
+ * masters and releases together; searching each type separately cost a second call per track
+ * and found little extra.
  */
-export class Discogs {
-  private readonly deps: LookupDeps;
-  private readonly token: string;
-  // Authenticated clients get 60 requests per minute.
-  private readonly limiter: RateLimiter;
+export class Discogs implements ProviderClient {
+  readonly id = "discogs";
+  private readonly http: ServiceClient;
 
   constructor(deps: LookupDeps, token: string) {
-    this.deps = deps;
-    this.token = token;
-    this.limiter = new RateLimiter(1100, deps.sleep);
+    // Authenticated clients get 60 requests per minute.
+    this.http = new ServiceClient(deps, {
+      name: "Discogs",
+      source: this.id,
+      intervalMs: 1100,
+      headers: { authorization: `Discogs token=${token}` },
+    });
   }
 
-  async findStyles(artist: string, title: string): Promise<DiscogsMatch | null> {
-    for (const type of ["master", "release"] as const) {
-      const url = `https://api.discogs.com/database/search?${new URLSearchParams({
-        type,
-        artist,
-        track: title,
-        per_page: "10",
-      })}`;
-      const match = await cachedGet(this.deps, this.limiter, {
-        source: `discogs-${type}`,
-        cacheKey: `${artist}\u0000${title}`.toLowerCase(),
-        url,
-        headers: { authorization: `Discogs token=${this.token}` },
-        parse: (body) => pickResult(body as SearchResponse, artist),
-      });
-      if (match) return match;
-    }
-    return null;
+  async trackTags({ artist, title }: TrackQuery): Promise<TrackTags> {
+    const url = `https://api.discogs.com/database/search?${new URLSearchParams({
+      artist,
+      track: title,
+      per_page: "25",
+    })}`;
+    const match = await this.http.get({
+      key: [artist, title],
+      url,
+      parse: (body) => pickResult(body as SearchResponse, artist),
+    });
+    if (!match) return { genres: [] };
+    return {
+      externalId: match.id,
+      genres: [...match.styles, ...match.genres].map((tag) => ({
+        tag,
+        source: this.id,
+        weight: 1,
+      })),
+    };
   }
 }
 
+export const discogs: TagProvider = {
+  id: "discogs",
+  label: "Discogs",
+  help: "The main subgenre source (release styles such as Synthwave or Deep House).",
+  envVars: ["DISCOGS_TOKEN"],
+  create: (deps, env) => new Discogs(deps, env.DISCOGS_TOKEN ?? ""),
+};
+
 export function pickResult(body: SearchResponse | null, artist: string): DiscogsMatch | null {
-  for (const r of body?.results ?? []) {
+  const results = (body?.results ?? []).filter((r) => r.type === "master" || r.type === "release");
+  // Stable sort: masters first, otherwise keep Discogs' relevance order.
+  results.sort((a, b) => Number(b.type === "master") - Number(a.type === "master"));
+  for (const r of results) {
     if (r.format?.some((f) => /compilation/i.test(f))) continue;
     // Titles are "Artist - Release Title"; a missing separator means an odd entry, skip it.
     const sep = r.title.indexOf(" - ");

@@ -9,8 +9,7 @@ const track = (videoId: string): Track => ({
   durationS: null,
   artist: null,
   songTitle: null,
-  mbid: null,
-  discogsId: null,
+  externalIds: {},
   enrichedAt: "2026-01-01",
 });
 
@@ -98,5 +97,32 @@ describe("estimateQuota", () => {
       100,
     );
     expect(est).toEqual({ playlists: 2, additions: 4, units: 300, days: 3 });
+  });
+});
+
+describe("Store migration", () => {
+  it("moves per-provider id columns into external_ids", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { Store } = await import("../src/db.ts");
+    const { tempDir } = await import("./helpers.ts");
+    const path = `${tempDir()}/old.db`;
+    const old = new DatabaseSync(path);
+    old.exec(`
+      CREATE TABLE tracks (video_id TEXT PRIMARY KEY, title TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '',
+        duration_s INTEGER, artist TEXT, song_title TEXT, mbid TEXT, discogs_id TEXT, enriched_at TEXT);
+      CREATE TABLE playlist_items (playlist_id TEXT NOT NULL, video_id TEXT NOT NULL, position INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, video_id));
+      INSERT INTO tracks (video_id, title, mbid, discogs_id) VALUES ('a', 'A', 'mb-1', 'master/2'), ('b', 'B', NULL, NULL);
+      INSERT INTO playlist_items VALUES ('PL', 'a', 0), ('PL', 'b', 1);`);
+    old.close();
+
+    const store = new Store(path);
+    expect(store.playlistTracks("PL").map((t) => t.externalIds)).toEqual([
+      { musicbrainz: "mb-1", discogs: "master/2" },
+      {},
+    ]);
+    store.close();
+    // Opening again is a no-op.
+    expect(new Store(path).playlistTracks("PL")).toHaveLength(2);
   });
 });

@@ -7,6 +7,7 @@ import { applyRun, type Privacy } from "./apply.ts";
 import { type Config, loadConfig, VERSION } from "./config.ts";
 import { DIMENSIONS, type Dimension, Store } from "./db.ts";
 import { enrichPlaylist } from "./enrich/pipeline.ts";
+import { PROVIDERS, providerStatuses } from "./enrich/providers.ts";
 import { percent, table } from "./format.ts";
 import { estimateQuota, planGroups } from "./planner.ts";
 import { startServer } from "./server/index.ts";
@@ -81,28 +82,30 @@ program
 
 program
   .command("enrich")
-  .description("Tag tracks with subgenre, mood and song type from MusicBrainz, Discogs and Last.fm")
+  .description(
+    `Tag tracks with subgenre, mood and song type (providers: ${PROVIDERS.map((p) => p.id).join(", ")})`,
+  )
   .argument("<playlist>", "playlist URL or ID (must be fetched first)")
   .option("--force", "re-process tracks that were already enriched (cached lookups are reused)")
   .option("--max-api-calls <n>", "stop after this many uncached API calls", positiveInt)
-  .option("--no-musicbrainz", "skip MusicBrainz matching")
+  .option("--skip <providers>", "comma-separated provider ids not to ask", (v) =>
+    v.split(",").map((id) => id.trim()),
+  )
   .action(
-    async (
-      input: string,
-      opts: { force?: boolean; maxApiCalls?: number; musicbrainz: boolean },
-    ) => {
+    async (input: string, opts: { force?: boolean; maxApiCalls?: number; skip?: string[] }) => {
       const config = loadConfig();
       const store = openStore(config);
       try {
         const { playlistId, title } = requireFetched(store, input);
+        const unknown = (opts.skip ?? []).filter((id) => !PROVIDERS.some((p) => p.id === id));
+        if (unknown.length > 0) throw new Error(`Unknown provider: ${unknown.join(", ")}`);
         const { enrichers, budget } = createEnrichers(config, store, {
           maxApiCalls: opts.maxApiCalls,
-          musicbrainz: opts.musicbrainz,
+          skip: opts.skip,
         });
-        if (!enrichers.discogs)
-          out("DISCOGS_TOKEN not set: skipping Discogs (main subgenre source).");
-        if (!enrichers.lastfm)
-          out("LASTFM_API_KEY not set: skipping Last.fm (the only mood source).");
+        for (const p of providerStatuses(config.env).filter((s) => !s.configured)) {
+          out(`${p.envVars.join(", ")} not set: skipping ${p.label}. ${p.help}`);
+        }
 
         out(`Enriching "${title}"...`);
         const summary = await enrichPlaylist(store, playlistId, enrichers, {

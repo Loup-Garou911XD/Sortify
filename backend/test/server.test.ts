@@ -3,7 +3,13 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { JobView, PlaylistDetail, PreviewResponse, RunDetail } from "../src/api/types.ts";
+import type {
+  JobView,
+  PlaylistDetail,
+  PreviewResponse,
+  RunDetail,
+  StatusResponse,
+} from "../src/api/types.ts";
 import { Store } from "../src/db.ts";
 import { type AppDeps, createApp, type YouTubeApi } from "../src/server/app.ts";
 import { PendingAuthStore } from "../src/youtube/auth.ts";
@@ -60,7 +66,7 @@ async function setup(overrides: Partial<AppDeps> = {}) {
     ["b", "House"],
     ["c", "Techno"],
   ] as const) {
-    store.saveEnrichment(id, { artist: "X", songTitle: id, mbid: null, discogsId: null }, [
+    store.saveEnrichment(id, { artist: "X", songTitle: id, externalIds: {} }, [
       { dimension: "subgenre", value, rawTag: value, source: "discogs", weight: 1 },
     ]);
   }
@@ -68,7 +74,7 @@ async function setup(overrides: Partial<AppDeps> = {}) {
   const calls: string[] = [];
   let signIns = 0;
   const app = createApp({
-    config: { ...testConfig(), discogsToken: "t", lastfmApiKey: undefined },
+    config: testConfig({ DISCOGS_TOKEN: "t" }),
     store,
     youtube: () => yt,
     port: 4747,
@@ -139,10 +145,13 @@ describe("security", () => {
 describe("api", () => {
   it("reports status and configured sources", async () => {
     const { api } = await setup();
-    const { body } = await api<{ sources: Record<string, boolean>; signedIn: boolean }>(
-      "/api/status",
-    );
-    expect(body.sources).toEqual({ musicbrainz: true, discogs: true, lastfm: false });
+    const { body } = await api<StatusResponse>("/api/status");
+    expect(body.sources.map((s) => [s.id, s.configured])).toEqual([
+      ["musicbrainz", true],
+      ["discogs", true],
+      ["lastfm", false],
+    ]);
+    expect(body.sources[2]).toMatchObject({ label: "Last.fm", envVars: ["LASTFM_API_KEY"] });
     expect(body.signedIn).toBe(false);
   });
 

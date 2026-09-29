@@ -3,20 +3,6 @@ import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { Button } from "./ui.tsx";
 
-const SOURCES = [
-  { key: "musicbrainz", name: "MusicBrainz", help: "Corrects artist and title spelling." },
-  {
-    key: "discogs",
-    name: "Discogs",
-    help: "Main subgenre source. Set DISCOGS_TOKEN and restart `sortify ui`.",
-  },
-  {
-    key: "lastfm",
-    name: "Last.fm",
-    help: "The only mood source. Set LASTFM_API_KEY and restart `sortify ui`.",
-  },
-] as const;
-
 export function TopBar() {
   const { status, openSignIn, refresh } = useApp();
   const [signingOut, setSigningOut] = useState(false);
@@ -35,17 +21,15 @@ export function TopBar() {
 
       <div className="topbar-right">
         <ul className="sources" aria-label="Tag sources">
-          {SOURCES.map((s) => {
-            const on = status?.sources[s.key] ?? false;
+          {(status?.sources ?? []).map((s) => {
+            const help = s.configured
+              ? s.help
+              : `${s.help} Set ${s.envVars.join(" and ")} and restart \`sortify ui\`.`;
             return (
-              <li
-                key={s.key}
-                className={on ? "source on" : "source off"}
-                title={on ? s.help.split(".")[0] : s.help}
-              >
+              <li key={s.id} className={s.configured ? "source on" : "source off"} title={help}>
                 <span className="dot" aria-hidden />
-                {s.name}
-                <span className="sr-only">{on ? " connected" : " not configured"}</span>
+                {s.label}
+                <span className="sr-only">{s.configured ? " connected" : " not configured"}</span>
               </li>
             );
           })}

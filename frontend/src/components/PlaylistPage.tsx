@@ -21,6 +21,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
 
   const { playlist, tracks } = detail.data;
   const untagged = playlist.total - playlist.enriched;
+  const missingSources = status?.sources.filter((s) => !s.configured) ?? [];
 
   const run = async (path: string, body: unknown = {}) => {
     setError(undefined);
@@ -81,17 +82,24 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           You can keep working; the page updates when it finishes.
         </Notice>
       )}
-      {status && (!status.sources.discogs || !status.sources.lastfm) && untagged > 0 && (
+      {missingSources.length > 0 && untagged > 0 && (
         <Notice tone="warn">
-          {!status.sources.discogs && !status.sources.lastfm
-            ? "Discogs and Last.fm are not configured, so most tracks will end up Unsorted. "
-            : !status.sources.discogs
-              ? "Discogs is not configured, so subgenres come only from Last.fm and MusicBrainz. "
-              : "Last.fm is not configured, so there will be no moods. "}
-          Set {!status.sources.discogs && <code>DISCOGS_TOKEN</code>}
-          {!status.sources.discogs && !status.sources.lastfm && " and "}
-          {!status.sources.lastfm && <code>LASTFM_API_KEY</code>}, then restart{" "}
-          <code>sortify ui</code>.
+          Not configured, so tracks will miss their tags:
+          <ul className="notice-list">
+            {missingSources.map((s) => (
+              <li key={s.id}>
+                <strong>{s.label}</strong>: {s.help} Set{" "}
+                {s.envVars.map((v, i) => (
+                  <span key={v}>
+                    {i > 0 && " and "}
+                    <code>{v}</code>
+                  </span>
+                ))}
+                .
+              </li>
+            ))}
+          </ul>
+          Then restart <code>sortify ui</code>.
         </Notice>
       )}
 

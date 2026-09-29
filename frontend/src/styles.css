@@ -574,6 +574,10 @@ li:hover > .icon-btn,
   background: var(--good-soft);
   color: var(--good);
 }
+.notice-list {
+  margin: 6px 0;
+  padding-left: 20px;
+}
 .notice code {
   background: rgb(127 127 127 / 14%);
 }

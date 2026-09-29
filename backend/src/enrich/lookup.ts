@@ -29,7 +29,10 @@ export class Budget {
   }
 }
 
-/** Enforces a minimum gap between requests to one service. */
+/**
+ * Enforces a minimum gap between requests to one service. Slots are reserved synchronously, so
+ * concurrent callers are spaced out instead of all waking at the same moment.
+ */
 export class RateLimiter {
   private next = 0;
   private readonly intervalMs: number;
@@ -43,9 +46,15 @@ export class RateLimiter {
   }
 
   async wait(): Promise<void> {
-    const delay = this.next - this.now();
-    if (delay > 0) await this.sleep(delay);
-    this.next = Math.max(this.now(), this.next) + this.intervalMs;
+    const now = this.now();
+    const slot = Math.max(now, this.next);
+    this.next = slot + this.intervalMs;
+    if (slot > now) await this.sleep(slot - now);
+  }
+
+  /** Pushes every caller's next slot back, e.g. after the service answered "slow down". */
+  penalize(ms: number): void {
+    this.next = Math.max(this.next, this.now() + ms);
   }
 }
 
@@ -59,60 +68,108 @@ export interface LookupDeps {
 
 const MAX_ATTEMPTS = 3;
 
-const SERVICE_NAMES: Record<string, string> = {
-  musicbrainz: "MusicBrainz",
-  discogs: "Discogs",
-  lastfm: "Last.fm",
-};
+/** Cache key from lookup inputs; case-insensitive so "ADELE" and "Adele" share an entry. */
+export const lookupKey = (...parts: string[]): string => parts.join("\u0000").toLowerCase();
+
+export interface ServiceOptions {
+  /** Display name used in error messages, e.g. "Last.fm". */
+  name: string;
+  /** Cache namespace; the provider id. */
+  source: string;
+  /** Minimum gap between requests, from the service's rate limit. */
+  intervalMs: number;
+  /** Sent with every request, e.g. an Authorization header. */
+  headers?: Record<string, string>;
+}
+
+export interface LookupRequest<T> {
+  /** Separate cache namespace within the service, e.g. "track" or "artist". */
+  kind?: string;
+  /** Lookup inputs; joined with lookupKey for the cache. */
+  key: string[];
+  url: string;
+  parse: (body: unknown, status: number) => T;
+}
 
 /**
- * GETs JSON through the SQLite lookup cache. `parse` turns the response body into the value that
- * is cached, so a "no match" result is cached too and never re-requested. Returns undefined
- * (uncached) when the service keeps failing, so one flaky service does not stop enrichment.
+ * Everything a metadata provider needs to call its HTTP API politely: its own rate limit, the
+ * shared SQLite lookup cache, the run's API budget, retries with service-wide backoff, and one
+ * shared request for identical concurrent lookups. Providers only build URLs and parse bodies.
  */
-export async function cachedGet<T>(
-  deps: LookupDeps,
-  limiter: RateLimiter,
-  request: {
-    source: string;
-    cacheKey: string;
-    url: string;
-    headers?: Record<string, string>;
-    parse: (body: unknown, status: number) => T;
-  },
-): Promise<T | undefined> {
-  const cached = deps.store.cacheGet(request.source, request.cacheKey);
-  if (cached !== undefined) return cached as T;
+export class ServiceClient {
+  readonly name: string;
+  private readonly deps: LookupDeps;
+  private readonly options: ServiceOptions;
+  private readonly limiter: RateLimiter;
+  private readonly inflight = new Map<string, Promise<unknown>>();
 
-  const fetchImpl = deps.fetch ?? fetch;
-  const sleep = deps.sleep ?? realSleep;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    deps.budget.take();
-    await limiter.wait();
-    let res: Response;
-    try {
-      res = await fetchImpl(request.url, {
-        headers: { "user-agent": deps.userAgent, accept: "application/json", ...request.headers },
-      });
-    } catch {
-      await sleep(1000 * attempt);
-      continue;
-    }
-    // 503 (MusicBrainz) and 429 (Discogs, Last.fm) mean "slow down".
-    if (res.status === 429 || res.status >= 500) {
-      await sleep(2000 * attempt);
-      continue;
-    }
-    // A bad token or API key would otherwise be cached as "no match" for every track.
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(
-        `${SERVICE_NAMES[request.source.split("-")[0] ?? ""] ?? request.source} rejected the request (HTTP ${res.status}); check its API key or token`,
-      );
-    }
-    const body: unknown = await res.json().catch(() => null);
-    const value = request.parse(body, res.status);
-    deps.store.cachePut(request.source, request.cacheKey, value);
-    return value;
+  constructor(deps: LookupDeps, options: ServiceOptions) {
+    this.deps = deps;
+    this.options = options;
+    this.name = options.name;
+    this.limiter = new RateLimiter(options.intervalMs, deps.sleep);
   }
-  return undefined;
+
+  /**
+   * GETs JSON through the cache. `parse` turns the body into the value that is cached, so a "no
+   * match" is cached too and never re-requested. Resolves to undefined (uncached) when the service
+   * keeps failing, so one flaky service does not stop tagging.
+   */
+  get<T>(request: LookupRequest<T>): Promise<T | undefined> {
+    const source = request.kind ? `${this.options.source}-${request.kind}` : this.options.source;
+    const key = lookupKey(...request.key);
+    const cached = this.deps.store.cacheGet(source, key);
+    if (cached !== undefined) return Promise.resolve(cached as T);
+
+    const flightKey = `${source}\u0000${key}`;
+    const pending = this.inflight.get(flightKey);
+    if (pending) return pending as Promise<T | undefined>;
+    const lookup = this.fetchAndCache(source, key, request).finally(() =>
+      this.inflight.delete(flightKey),
+    );
+    this.inflight.set(flightKey, lookup);
+    return lookup;
+  }
+
+  private async fetchAndCache<T>(
+    source: string,
+    key: string,
+    request: LookupRequest<T>,
+  ): Promise<T | undefined> {
+    const fetchImpl = this.deps.fetch ?? fetch;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      this.deps.budget.take();
+      await this.limiter.wait();
+      let res: Response;
+      try {
+        res = await fetchImpl(request.url, {
+          headers: {
+            "user-agent": this.deps.userAgent,
+            accept: "application/json",
+            ...this.options.headers,
+          },
+        });
+      } catch {
+        this.limiter.penalize(1000 * attempt);
+        continue;
+      }
+      // 503 (MusicBrainz) and 429 (Discogs, Last.fm) mean "slow down": back off for every
+      // caller of this service, not just this one.
+      if (res.status === 429 || res.status >= 500) {
+        this.limiter.penalize(2000 * attempt);
+        continue;
+      }
+      // A bad token or API key would otherwise be cached as "no match" for every track.
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(
+          `${this.name} rejected the request (HTTP ${res.status}); check its API key or token`,
+        );
+      }
+      const body: unknown = await res.json().catch(() => null);
+      const value = request.parse(body, res.status);
+      this.deps.store.cachePut(source, key, value);
+      return value;
+    }
+    return undefined;
+  }
 }

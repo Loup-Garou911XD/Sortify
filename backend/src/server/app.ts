@@ -20,6 +20,7 @@ import { applyRun, type PlaylistWriter } from "../apply.ts";
 import { type Config, VERSION } from "../config.ts";
 import { DIMENSIONS, type Run, type Store } from "../db.ts";
 import { enrichPlaylist } from "../enrich/pipeline.ts";
+import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
 import { createEnrichers, fetchPlaylist, type PlaylistReader } from "../services.ts";
 import {
@@ -237,11 +238,7 @@ export function createApp(deps: AppDeps) {
           version: VERSION,
           hasClientSecrets: state.clientSecretsError === null,
           ...state,
-          sources: {
-            musicbrainz: true,
-            discogs: Boolean(config.discogsToken),
-            lastfm: Boolean(config.lastfmApiKey),
-          },
+          sources: providerStatuses(config.env),
           dailyQuota: config.dailyQuota,
         };
       },
