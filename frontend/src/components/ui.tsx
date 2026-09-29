@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
-import type { Dimension, TrackTagView } from "../../../src/api/types.ts";
+import type { Dimension, TrackTagView } from "../../../backend/src/api/types.ts";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 

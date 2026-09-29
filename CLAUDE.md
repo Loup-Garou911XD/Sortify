@@ -14,7 +14,8 @@ npm run lint                   # biome check (npm run format to auto-fix)
 npm run typecheck              # tsc for src/ and test/, then web/
 npm run build                  # CLI (tsc → dist/) + web UI (vite → dist/web)
 npm run sortify -- ui          # local web UI on http://127.0.0.1:4747 (serves dist/web)
-npm run dev:web                # Vite dev server with hot reload; proxies /api to `sortify ui`
+npm run dev                    # UI development: `sortify ui` (restarts on src/ changes) + Vite hot reload
+npm run dev:web                # Vite only; proxies /api to a `sortify ui` you start yourself
 ```
 
 Requires Node ≥ 24: the code uses the built-in `node:sqlite` module and runs `.ts` files directly. Because of type stripping, `tsconfig.json` sets `erasableSyntaxOnly`: no enums, namespaces or constructor parameter properties. Relative imports use `.ts` extensions (rewritten to `.js` on build).

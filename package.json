@@ -1,44 +1,26 @@
 {
-  "name": "sortify",
-  "version": "0.1.0",
+  "name": "sortify-workspace",
+  "private": true,
   "description": "Split large YouTube / YouTube Music playlists into focused sub-playlists by subgenre, mood or song type.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
-  "bin": {
-    "sortify": "dist/cli.js"
-  },
-  "files": [
-    "dist"
+  "workspaces": [
+    "backend",
+    "frontend"
   ],
   "scripts": {
-    "sortify": "node src/cli.ts",
-    "build": "tsc -p tsconfig.build.json && vite build web",
-    "build:web": "vite build web",
-    "dev:web": "vite web",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p web",
+    "dev": "node scripts/dev.mjs",
+    "sortify": "npm run -s sortify -w backend --",
+    "build": "npm run build -w frontend && npm run build -w backend",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm test -w backend",
     "lint": "biome check .",
-    "format": "biome check --write .",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "commander": "^15.0.0",
-    "google-auth-library": "^11.1.0",
-    "yaml": "^2.9.1"
+    "format": "biome check --write ."
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@types/node": "^24.19.0",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "typescript": "^7.0.2",
-    "vite": "^8.3.1",
-    "vitest": "^5.0.2"
+    "@biomejs/biome": "^2.5.14"
   }
 }

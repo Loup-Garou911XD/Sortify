@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { TrackView } from "../../../src/api/types.ts";
+import type { TrackView } from "../../../backend/src/api/types.ts";
 import { duration, fmt } from "../hooks.ts";
 import { Button, Segmented, TagChips } from "./ui.tsx";
 

@@ -5,8 +5,12 @@ import { Store } from "../db.ts";
 import { youtubeFor } from "../services.ts";
 import { createApp } from "./app.ts";
 
-/** Built UI lives in <repo>/dist/web both when running from src/ and from dist/. */
-export const DEFAULT_STATIC_DIR = fileURLToPath(new URL("../../dist/web/", import.meta.url));
+/**
+ * The built frontend (<repo>/frontend/dist). The path is the same from backend/src/server and
+ * backend/dist/server; SORTIFY_UI_DIR overrides it.
+ */
+export const DEFAULT_STATIC_DIR =
+  process.env.SORTIFY_UI_DIR ?? fileURLToPath(new URL("../../../frontend/dist/", import.meta.url));
 
 export async function startServer(
   config: Config,

@@ -484,7 +484,9 @@ export function createApp(deps: AppDeps) {
     const root = deps.staticDir ? resolve(deps.staticDir) : undefined;
     if (!root || !existsSync(join(root, "index.html"))) {
       res.writeHead(503, { "content-type": "text/plain; charset=utf-8" });
-      res.end("The web UI is not built. Run `npm run build:web`, then restart `sortify ui`.");
+      res.end(
+        "The web UI is not built. Run `npm run build` at the repo root, then restart `sortify ui`.",
+      );
       return;
     }
     let file = resolve(root, `.${decodeURIComponent(url.pathname)}`);

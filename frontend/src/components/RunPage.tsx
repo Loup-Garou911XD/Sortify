@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Privacy, RunDetail } from "../../../src/api/types.ts";
+import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";

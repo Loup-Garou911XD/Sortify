@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PlaylistDetail } from "../../../src/api/types.ts";
+import type { PlaylistDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
 import { SortPanel } from "./SortPanel.tsx";

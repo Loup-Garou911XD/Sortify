@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Dimension, PreviewResponse, RunSummary, TrackView } from "../../../src/api/types.ts";
+import type {
+  Dimension,
+  PreviewResponse,
+  RunSummary,
+  TrackView,
+} from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, pct, plural, quotaFor, useDebounced } from "../hooks.ts";

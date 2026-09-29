@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import type { JobView, PlaylistSummary, RunSummary, StatusResponse } from "../../src/api/types.ts";
+import type {
+  JobView,
+  PlaylistSummary,
+  RunSummary,
+  StatusResponse,
+} from "../../backend/src/api/types.ts";
 import { api } from "./api.ts";
 import { JobBar } from "./components/JobBar.tsx";
 import { PlaylistPage } from "./components/PlaylistPage.tsx";

@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import type { StatusResponse } from "../../../src/api/types.ts";
+import type { StatusResponse } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { useInterval } from "../hooks.ts";
