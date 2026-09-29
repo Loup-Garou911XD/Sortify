@@ -10,6 +10,7 @@ const track = (videoId: string): Track => ({
   artist: null,
   songTitle: null,
   externalIds: {},
+  failedProviders: [],
   enrichedAt: "2026-01-01",
 });
 

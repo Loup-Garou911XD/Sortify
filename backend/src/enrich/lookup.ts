@@ -12,6 +12,17 @@ export class BudgetExhaustedError extends Error {
   }
 }
 
+/**
+ * A lookup that kept failing (network errors, "slow down" answers) after its retries. Nothing is
+ * cached, and the pipeline marks the track so the next run asks that provider again.
+ */
+export class LookupFailedError extends Error {
+  constructor(service: string) {
+    super(`${service} did not answer after several tries`);
+    this.name = "LookupFailedError";
+  }
+}
+
 /** Caps external API calls per command invocation (`--max-api-calls`). Cache hits are free. */
 export class Budget {
   used = 0;
@@ -80,6 +91,11 @@ export interface ServiceOptions {
   intervalMs: number;
   /** Sent with every request, e.g. an Authorization header; a function for short-lived tokens. */
   headers?: Record<string, string> | (() => Promise<Record<string, string>>);
+  /**
+   * The requests carry an API key or token. Then 401/403 means a bad key and stops the run; for
+   * keyless services it usually means throttling or a temporary block, so it is retried.
+   */
+  authenticated?: boolean;
 }
 
 export interface LookupRequest<T> {
@@ -112,10 +128,10 @@ export class ServiceClient {
 
   /**
    * GETs JSON through the cache. `parse` turns the body into the value that is cached, so a "no
-   * match" is cached too and never re-requested. Resolves to undefined (uncached) when the service
-   * keeps failing, so one flaky service does not stop tagging.
+   * match" is cached too and never re-requested. Rejects with LookupFailedError (nothing cached)
+   * when the service keeps failing, so the caller can carry on and retry it later.
    */
-  get<T>(request: LookupRequest<T>): Promise<T | undefined> {
+  get<T>(request: LookupRequest<T>): Promise<T> {
     const source = request.kind ? `${this.options.source}-${request.kind}` : this.options.source;
     const key = lookupKey(...request.key);
     const cached = this.deps.store.cacheGet(source, key);
@@ -123,7 +139,7 @@ export class ServiceClient {
 
     const flightKey = `${source}\u0000${key}`;
     const pending = this.inflight.get(flightKey);
-    if (pending) return pending as Promise<T | undefined>;
+    if (pending) return pending as Promise<T>;
     const lookup = this.fetchAndCache(source, key, request).finally(() =>
       this.inflight.delete(flightKey),
     );
@@ -135,7 +151,7 @@ export class ServiceClient {
     source: string,
     key: string,
     request: LookupRequest<T>,
-  ): Promise<T | undefined> {
+  ): Promise<T> {
     const fetchImpl = this.deps.fetch ?? fetch;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       this.deps.budget.take();
@@ -154,14 +170,15 @@ export class ServiceClient {
         this.limiter.penalize(1000 * attempt);
         continue;
       }
-      // 503 (MusicBrainz) and 429 (Discogs, Last.fm) mean "slow down": back off for every
-      // caller of this service, not just this one.
-      if (res.status === 429 || res.status >= 500) {
+      const denied = res.status === 401 || res.status === 403;
+      // 503 (MusicBrainz) and 429 (Discogs, Last.fm) mean "slow down", and so does a 403 from a
+      // keyless service: back off for every caller of this service, not just this one.
+      if (res.status === 429 || res.status >= 500 || (denied && !this.options.authenticated)) {
         this.limiter.penalize(2000 * attempt);
         continue;
       }
       // A bad token or API key would otherwise be cached as "no match" for every track.
-      if (res.status === 401 || res.status === 403) {
+      if (denied) {
         throw new Error(
           `${this.name} rejected the request (HTTP ${res.status}); check its API key or token`,
         );
@@ -171,6 +188,6 @@ export class ServiceClient {
       this.deps.store.cachePut(source, key, value);
       return value;
     }
-    return undefined;
+    throw new LookupFailedError(this.name);
   }
 }

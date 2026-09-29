@@ -55,7 +55,10 @@ export interface TrackView {
   durationS: number | null;
   artist: string | null;
   songTitle: string | null;
+  /** Tagged, with every provider answering. */
   enriched: boolean;
+  /** Providers that were unreachable last time; the next "Tag" run asks them again. */
+  retryProviders: string[];
   tags: TrackTagView[];
 }
 

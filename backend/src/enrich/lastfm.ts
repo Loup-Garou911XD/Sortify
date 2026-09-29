@@ -35,7 +35,12 @@ export class LastFm implements ProviderClient {
 
   constructor(deps: LookupDeps, apiKey: string) {
     this.apiKey = apiKey;
-    this.http = new ServiceClient(deps, { name: "Last.fm", source: this.id, intervalMs: 250 });
+    this.http = new ServiceClient(deps, {
+      name: "Last.fm",
+      source: this.id,
+      intervalMs: 250,
+      authenticated: true,
+    });
   }
 
   private toRaw(tags: LastFmTag[], factor = 1): RawTag[] {
@@ -52,13 +57,12 @@ export class LastFm implements ProviderClient {
       api_key: this.apiKey,
       format: "json",
     })}`;
-    const tags = await this.http.get({
+    return this.http.get({
       kind,
       key: Object.values(params),
       url,
       parse: (body) => parseTags(body as TopTagsResponse),
     });
-    return tags ?? [];
   }
 
   async trackTags({ artist, title }: TrackQuery): Promise<TrackTags> {

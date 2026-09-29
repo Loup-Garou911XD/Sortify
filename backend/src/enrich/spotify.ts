@@ -43,6 +43,7 @@ export class Spotify implements ProviderClient {
       source: this.id,
       intervalMs: 250,
       headers: async () => ({ authorization: `Bearer ${await this.accessToken()}` }),
+      authenticated: true,
     });
   }
 
@@ -97,7 +98,7 @@ export class Spotify implements ProviderClient {
     });
     return {
       externalId: match.id,
-      genres: (genres ?? []).map((tag) => ({ tag, source: this.id, weight: GENRE_WEIGHT })),
+      genres: genres.map((tag) => ({ tag, source: this.id, weight: GENRE_WEIGHT })),
     };
   }
 }

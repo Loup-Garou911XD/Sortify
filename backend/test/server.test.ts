@@ -66,7 +66,7 @@ async function setup(overrides: Partial<AppDeps> = {}) {
     ["b", "House"],
     ["c", "Techno"],
   ] as const) {
-    store.saveEnrichment(id, { artist: "X", songTitle: id, externalIds: {} }, [
+    store.saveEnrichment(id, { artist: "X", songTitle: id, externalIds: {}, failedProviders: [] }, [
       { dimension: "subgenre", value, rawTag: value, source: "discogs", weight: 1 },
     ]);
   }

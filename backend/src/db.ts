@@ -15,6 +15,8 @@ export interface Track {
   songTitle: string | null;
   /** Provider id → that provider's id for the track, e.g. { musicbrainz: "<MBID>" }. */
   externalIds: Record<string, string>;
+  /** Providers that were unreachable when the track was last tagged; retried on the next run. */
+  failedProviders: string[];
   enrichedAt: string | null;
 }
 
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS tracks (
   channel     TEXT NOT NULL DEFAULT '',
   duration_s  INTEGER,
   topics      TEXT,
+  failed_providers TEXT,
   artist      TEXT,
   song_title  TEXT,
   external_ids TEXT,
@@ -143,7 +146,8 @@ CREATE TABLE IF NOT EXISTS run_items (
 `;
 
 const TRACK_COLUMNS = `t.video_id AS videoId, t.title, t.channel, t.duration_s AS durationS,
-  t.artist, t.song_title AS songTitle, t.external_ids AS externalIds, t.enriched_at AS enrichedAt`;
+  t.artist, t.song_title AS songTitle, t.external_ids AS externalIds,
+  t.failed_providers AS failedProviders, t.enriched_at AS enrichedAt`;
 
 const RUN_COLUMNS = `run_id AS runId, source_playlist_id AS sourcePlaylistId, dimension,
   min_size AS minSize, created_at AS createdAt, status, quota_used AS quotaUsed,
@@ -182,9 +186,10 @@ export class Store {
     const columns = new Set(
       (this.db.prepare("PRAGMA table_info(tracks)").all() as { name: string }[]).map((c) => c.name),
     );
-    if (columns.has("external_ids") && columns.has("topics")) return;
+    const added = ["topics", "failed_providers"].filter((c) => !columns.has(c));
+    if (columns.has("external_ids") && added.length === 0) return;
     this.tx(() => {
-      if (!columns.has("topics")) this.db.exec("ALTER TABLE tracks ADD COLUMN topics TEXT");
+      for (const c of added) this.db.exec(`ALTER TABLE tracks ADD COLUMN ${c} TEXT`);
       if (columns.has("external_ids")) return;
       // Per-provider id columns became one JSON map, so new providers need no schema change.
       this.db.exec("ALTER TABLE tracks ADD COLUMN external_ids TEXT");
@@ -254,8 +259,15 @@ export class Store {
       `SELECT ${TRACK_COLUMNS} FROM tracks t
        JOIN playlist_items p ON p.video_id = t.video_id
        WHERE p.playlist_id = ? ORDER BY p.position`,
-    ).all(playlistId) as unknown as (Omit<Track, "externalIds"> & { externalIds: string | null })[];
-    return rows.map((r) => ({ ...r, externalIds: r.externalIds ? JSON.parse(r.externalIds) : {} }));
+    ).all(playlistId) as unknown as (Omit<Track, "externalIds" | "failedProviders"> & {
+      externalIds: string | null;
+      failedProviders: string | null;
+    })[];
+    return rows.map((r) => ({
+      ...r,
+      externalIds: r.externalIds ? JSON.parse(r.externalIds) : {},
+      failedProviders: r.failedProviders ? JSON.parse(r.failedProviders) : [],
+    }));
   }
 
   /** Videos whose duration or YouTube topics have not been fetched yet. */
@@ -292,14 +304,22 @@ export class Store {
       artist: string | null;
       songTitle: string | null;
       externalIds: Record<string, string>;
+      failedProviders: string[];
     },
     tags: Tag[],
   ): void {
     this.tx(() => {
       this.prep(
-        `UPDATE tracks SET artist = ?, song_title = ?, external_ids = ?, enriched_at = ?
-           WHERE video_id = ?`,
-      ).run(meta.artist, meta.songTitle, JSON.stringify(meta.externalIds), now(), videoId);
+        `UPDATE tracks SET artist = ?, song_title = ?, external_ids = ?, failed_providers = ?,
+           enriched_at = ? WHERE video_id = ?`,
+      ).run(
+        meta.artist,
+        meta.songTitle,
+        JSON.stringify(meta.externalIds),
+        meta.failedProviders.length > 0 ? JSON.stringify(meta.failedProviders) : null,
+        now(),
+        videoId,
+      );
       this.prep("DELETE FROM track_tags WHERE video_id = ?").run(videoId);
       const insert = this.prep(
         `INSERT INTO track_tags (video_id, dimension, value, raw_tag, source, weight)
@@ -418,7 +438,7 @@ export class Store {
     return this.prep(
       `SELECT p.playlist_id AS playlistId, p.title, p.fetched_at AS fetchedAt,
            COUNT(i.video_id) AS total,
-           COALESCE(SUM(t.enriched_at IS NOT NULL), 0) AS enriched,
+           COALESCE(SUM(t.enriched_at IS NOT NULL AND t.failed_providers IS NULL), 0) AS enriched,
            COALESCE(SUM(EXISTS (SELECT 1 FROM track_tags g
              WHERE g.video_id = i.video_id AND g.dimension = 'subgenre')), 0) AS withSubgenre,
            COALESCE(SUM(EXISTS (SELECT 1 FROM track_tags g

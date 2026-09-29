@@ -322,7 +322,8 @@ export function createApp(deps: AppDeps) {
             durationS: t.durationS,
             artist: t.artist,
             songTitle: t.songTitle,
-            enriched: t.enrichedAt !== null,
+            enriched: t.enrichedAt !== null && t.failedProviders.length === 0,
+            retryProviders: t.failedProviders,
             tags: tags.get(t.videoId) ?? [],
           }),
         );
@@ -351,6 +352,9 @@ export function createApp(deps: AppDeps) {
               },
             });
             let message = `Tagged ${summary.enriched} tracks with ${budget.used} API calls`;
+            if (summary.retryLater > 0) {
+              message += `; ${summary.retryLater} missed a source that did not answer and will be retried next time`;
+            }
             if (summary.stoppedByBudget) message += `; stopped at the API call limit`;
             if (summary.remaining > 0) message += `; ${summary.remaining} left`;
             return message;

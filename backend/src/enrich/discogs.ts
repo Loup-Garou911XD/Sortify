@@ -40,6 +40,7 @@ export class Discogs implements ProviderClient {
       source: this.id,
       intervalMs: 1100,
       headers: { authorization: `Discogs token=${token}` },
+      authenticated: true,
     });
   }
 

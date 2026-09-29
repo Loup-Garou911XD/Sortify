@@ -115,6 +115,11 @@ program
           },
         });
         out(`Enriched ${summary.enriched} tracks using ${budget.used} API calls.`);
+        if (summary.retryLater > 0) {
+          out(
+            `${summary.retryLater} tracks missed a source that did not answer; run the same command again to retry them.`,
+          );
+        }
         if (summary.stoppedByBudget) {
           out(
             `Stopped at --max-api-calls; ${summary.remaining} tracks left. Run the same command again to continue.`,

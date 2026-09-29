@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { TrackView } from "../../../backend/src/api/types.ts";
+import { useApp } from "../App.tsx";
 import { duration, fmt } from "../hooks.ts";
 import { Button, Segmented, TagChips } from "./ui.tsx";
 
@@ -9,6 +10,8 @@ const PAGE = 200;
 const hasGenreOrMood = (t: TrackView) => t.tags.some((g) => g.dimension !== "type");
 
 export function TracksTable({ tracks }: { tracks: TrackView[] }) {
+  const { status } = useApp();
+  const label = (id: string) => status?.sources.find((s) => s.id === id)?.label ?? id;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [limit, setLimit] = useState(PAGE);
@@ -85,7 +88,9 @@ export function TracksTable({ tracks }: { tracks: TrackView[] }) {
                     </a>
                     <span className="muted">
                       {t.artist ?? t.channel}
-                      {!t.enriched && " · not tagged yet"}
+                      {t.retryProviders.length > 0
+                        ? ` · will retry ${t.retryProviders.map(label).join(", ")}`
+                        : !t.enriched && " · not tagged yet"}
                     </span>
                   </div>
                 </td>

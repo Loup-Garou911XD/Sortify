@@ -1,6 +1,6 @@
 import type { Store, Tag, Track } from "../db.ts";
 import type { RawTag, TagMapper } from "../tagging/mapper.ts";
-import { BudgetExhaustedError } from "./lookup.ts";
+import { BudgetExhaustedError, LookupFailedError } from "./lookup.ts";
 import type { ProviderClient, TrackQuery } from "./provider.ts";
 import { detectSongTypes } from "./songType.ts";
 import { parseTitle } from "./titleParser.ts";
@@ -17,6 +17,8 @@ export interface EnrichedTrack {
     songTitle: string | null;
     /** Provider id → that provider's id for the track (MusicBrainz MBID, Discogs release…). */
     externalIds: Record<string, string>;
+    /** Providers that could not be reached; the track is tagged again on the next run. */
+    failedProviders: string[];
   };
   tags: Tag[];
 }
@@ -37,9 +39,22 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
   const parsed = parseTitle(track.title, track.channel);
   const tags: Tag[] = detectSongTypes(track.title, parsed.hints);
   const externalIds: Record<string, string> = {};
+  const failed = new Set<string>();
   if (!parsed.artist || !parsed.songTitle) {
-    return { meta: { artist: parsed.artist, songTitle: parsed.songTitle, externalIds }, tags };
+    const meta = { artist: parsed.artist, songTitle: parsed.songTitle, externalIds };
+    return { meta: { ...meta, failedProviders: [] }, tags };
   }
+
+  /** Runs one provider call; a provider that keeps failing is noted and skipped for now. */
+  const ask = async <T>(client: ProviderClient, call: () => Promise<T> | undefined) => {
+    try {
+      return await call();
+    } catch (error) {
+      if (!(error instanceof LookupFailedError)) throw error;
+      failed.add(client.id);
+      return undefined;
+    }
+  };
 
   const clients = enrichers.clients.filter((c) => !c.skip?.(parsed));
   let query: TrackQuery = {
@@ -52,7 +67,7 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
 
   let resolved = false;
   for (const client of clients) {
-    const match = await client.resolve?.(query);
+    const match = await ask(client, () => client.resolve?.(query));
     if (!match) continue;
     query = { ...query, artist: match.artist, title: match.title };
     if (match.externalId) externalIds[client.id] = match.externalId;
@@ -63,7 +78,10 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
 
   const collect = async (asked: ProviderClient[]): Promise<void> => {
     const results = await Promise.all(
-      asked.map(async (client) => ({ client, found: await client.trackTags?.(query) })),
+      asked.map(async (client) => ({
+        client,
+        found: await ask(client, () => client.trackTags?.(query)),
+      })),
     );
     for (const { client, found } of results) {
       if (!found) continue;
@@ -79,26 +97,37 @@ export async function enrichTrack(track: Track, enrichers: Enrichers): Promise<E
   // A guessed artist (e.g. from a label upload's credits) could pull in someone else's genres.
   if (genres.length === 0 && (parsed.confident || resolved)) {
     for (const client of clients) {
-      if (!client.artistTags) continue;
-      genres = enrichers.mapper.genres(await client.artistTags(query.artist));
+      const artistTags = client.artistTags?.bind(client);
+      if (!artistTags) continue;
+      genres = enrichers.mapper.genres((await ask(client, () => artistTags(query.artist))) ?? []);
       if (genres.length > 0) break;
     }
   }
 
   tags.push(...genres, ...enrichers.mapper.moodTags(moodRaw));
-  return { meta: { artist: query.artist, songTitle: query.title, externalIds }, tags };
+  return {
+    meta: {
+      artist: query.artist,
+      songTitle: query.title,
+      externalIds,
+      failedProviders: [...failed],
+    },
+    tags,
+  };
 }
 
 export interface EnrichSummary {
   enriched: number;
   remaining: number;
+  /** Tracks saved without some provider's data because it was unreachable; retried next run. */
+  retryLater: number;
   stoppedByBudget: boolean;
   cancelled: boolean;
 }
 
 /**
- * Enriches every track in a fetched playlist that has not been enriched yet (or all of them with
- * `force`), several at a time. Each track is saved as soon as it is done, so an interrupted run
+ * Enriches every track in a fetched playlist that is not tagged yet, or whose last tagging missed
+ * a provider that could not be reached (or all of them with `force`), several at a time. Each track is saved as soon as it is done, so an interrupted run
  * loses nothing.
  */
 export async function enrichPlaylist(
@@ -115,9 +144,10 @@ export async function enrichPlaylist(
 ): Promise<EnrichSummary> {
   const todo = store
     .playlistTracks(playlistId)
-    .filter((t) => options.force || t.enrichedAt === null);
+    .filter((t) => options.force || t.enrichedAt === null || t.failedProviders.length > 0);
   const queue = [...todo];
   let enriched = 0;
+  let retryLater = 0;
   let stoppedByBudget = false;
   let failure: { error: unknown } | undefined;
 
@@ -128,6 +158,7 @@ export async function enrichPlaylist(
       try {
         const result = await enrichTrack(track, enrichers);
         store.saveEnrichment(track.videoId, result.meta, result.tags);
+        if (result.meta.failedProviders.length > 0) retryLater++;
       } catch (error) {
         if (error instanceof BudgetExhaustedError) stoppedByBudget = true;
         else failure ??= { error };
@@ -145,6 +176,7 @@ export async function enrichPlaylist(
   return {
     enriched,
     remaining,
+    retryLater,
     stoppedByBudget,
     cancelled: remaining > 0 && !stoppedByBudget && Boolean(options.signal?.aborted),
   };

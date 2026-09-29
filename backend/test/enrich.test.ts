@@ -6,6 +6,7 @@ import {
   Budget,
   type FetchLike,
   type LookupDeps,
+  LookupFailedError,
   RateLimiter,
   ServiceClient,
 } from "../src/enrich/lookup.ts";
@@ -115,6 +116,7 @@ describe("enrichPlaylist", () => {
     expect(summary).toEqual({
       enriched: 3,
       remaining: 0,
+      retryLater: 0,
       stoppedByBudget: false,
       cancelled: false,
     });
@@ -164,6 +166,7 @@ describe("enrichPlaylist", () => {
     expect(rest).toEqual({
       enriched: partial.remaining,
       remaining: 0,
+      retryLater: 0,
       stoppedByBudget: false,
       cancelled: false,
     });
@@ -187,7 +190,13 @@ describe("enrichPlaylist", () => {
       signal: controller.signal,
       onProgress: () => controller.abort(),
     });
-    expect(summary).toEqual({ enriched: 1, remaining: 2, stoppedByBudget: false, cancelled: true });
+    expect(summary).toEqual({
+      enriched: 1,
+      remaining: 2,
+      retryLater: 0,
+      stoppedByBudget: false,
+      cancelled: true,
+    });
   });
 });
 
@@ -219,9 +228,9 @@ describe("lookup errors", () => {
       },
       sleep: async () => {},
     };
-    expect(
-      await new MusicBrainz(deps).resolve({ videoId: "v", artist: "A", title: "B" }),
-    ).toBeUndefined();
+    await expect(
+      new MusicBrainz(deps).resolve({ videoId: "v", artist: "A", title: "B" }),
+    ).rejects.toBeInstanceOf(LookupFailedError);
     expect(calls).toBe(3);
     expect(store.cacheGet("musicbrainz", "a\u0000b")).toBeUndefined();
   });
@@ -354,5 +363,76 @@ describe("providers", () => {
       "discogs",
       "youtube",
     ]);
+  });
+});
+
+describe("unreachable providers", () => {
+  const client = (status: () => number, authenticated: boolean) => {
+    let requests = 0;
+    const http = new ServiceClient(
+      {
+        store: new Store(":memory:"),
+        budget: new Budget(),
+        userAgent: "t",
+        sleep: async () => {},
+        fetch: async () => {
+          requests++;
+          return json({ ok: true }, status());
+        },
+      },
+      { name: "Svc", source: "svc", intervalMs: 0, authenticated },
+    );
+    return {
+      get: () => http.get({ key: ["k"], url: "https://x.test", parse: () => "ok" }),
+      requests: () => requests,
+    };
+  };
+
+  it("retries a 403 from a keyless service instead of blaming a key", async () => {
+    let n = 0;
+    const svc = client(() => (++n < 3 ? 403 : 200), false);
+    expect(await svc.get()).toBe("ok");
+    expect(svc.requests()).toBe(3);
+  });
+
+  it("still stops at once on a 403 from a service with a key", async () => {
+    const svc = client(() => 403, true);
+    await expect(svc.get()).rejects.toThrow(/Svc rejected the request \(HTTP 403\)/);
+    expect(svc.requests()).toBe(1);
+  });
+
+  it("keeps other tags, then retries the track on the next normal run", async () => {
+    const store = new Store(":memory:");
+    store.savePlaylist("PL", "Mix", [
+      { videoId: "a", title: "Kavinsky - Nightcall", channel: "x" },
+    ]);
+    let flakyUp = false;
+    const flaky: ProviderClient = {
+      id: "flaky",
+      trackTags: async () => {
+        if (!flakyUp) throw new LookupFailedError("Flaky");
+        return { genres: [], moods: [{ tag: "dark", source: "flaky", weight: 1 }] };
+      },
+    };
+    const steady: ProviderClient = {
+      id: "steady",
+      trackTags: async () => ({ genres: [{ tag: "synthwave", source: "steady", weight: 1 }] }),
+    };
+    const enrichers = { mapper: new TagMapper(), clients: [steady, flaky] };
+
+    const first = await enrichPlaylist(store, "PL", enrichers);
+    expect(first.retryLater).toBe(1);
+    expect(store.playlistTracks("PL")[0]?.failedProviders).toEqual(["flaky"]);
+    expect(store.playlistTags("PL", "subgenre").map((t) => t.value)).toEqual(["Synthwave"]);
+    expect(store.listPlaylists()[0]?.enriched).toBe(0);
+
+    flakyUp = true;
+    const second = await enrichPlaylist(store, "PL", enrichers);
+    expect(second).toMatchObject({ enriched: 1, retryLater: 0 });
+    expect(store.playlistTracks("PL")[0]?.failedProviders).toEqual([]);
+    expect(store.playlistTags("PL", "mood").map((t) => t.value)).toEqual(["Dark"]);
+    expect(store.listPlaylists()[0]?.enriched).toBe(1);
+    // Nothing left to do: the next run asks no one.
+    expect((await enrichPlaylist(store, "PL", enrichers)).enriched).toBe(0);
   });
 });
