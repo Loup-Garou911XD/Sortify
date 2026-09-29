@@ -97,6 +97,8 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   };
 
   const included = drafts.filter((d) => d.included && d.videoIds.length > 0);
+  const untagged = tracks.filter((t) => !t.enriched).length;
+  const noneTagged = untagged === tracks.length;
   const additions = included.reduce((sum, d) => sum + d.videoIds.length, 0);
   const quota = quotaFor(included.length, additions, status?.dailyQuota ?? 10_000);
   const nameCounts = new Map<string, number>();
@@ -193,6 +195,15 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
 
       {error && <Notice tone="error">{error}</Notice>}
 
+      {untagged > 0 && (
+        <Notice tone="warn">
+          {noneTagged
+            ? `None of these ${fmt(tracks.length)} tracks are tagged yet, so they would all land in Unsorted.`
+            : `${plural(untagged, "track")} ${untagged === 1 ? "isn't" : "aren't"} tagged yet and will land in Unsorted.`}{" "}
+          Use <strong>Tag {plural(untagged, "track")}</strong> at the top of the page first.
+        </Notice>
+      )}
+
       {preview && (
         <>
           <div className="summary" aria-live="polite">
@@ -220,7 +231,8 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
             <Button
               variant="primary"
               busy={saving}
-              disabled={included.length === 0 || Boolean(invalidName)}
+              disabled={included.length === 0 || Boolean(invalidName) || noneTagged}
+              title={noneTagged ? "Tag the tracks first" : undefined}
               onClick={save}
             >
               Save plan
