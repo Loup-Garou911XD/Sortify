@@ -39,6 +39,13 @@ export interface AppState {
   startJob: (path: string, body?: unknown) => Promise<void>;
   openSignIn: () => void;
   notify: (tone: Tone, text: string) => void;
+  /**
+   * Set only by shells that keep their own keys — the static build, where there is no `.env`.
+   * When present the Connections panel turns each row into a button and hands back the id of
+   * the source to configure ("account" for the Google client itself). Unset in the local app,
+   * where keys come from the environment and the rows stay plain text.
+   */
+  configureSource?: (id: string) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -51,7 +58,7 @@ export function useApp(): AppState {
 
 let toastId = 0;
 
-export function App() {
+export function App({ configureSource }: { configureSource?: (id: string) => void } = {}) {
   const [path, navigate] = useLocation();
   const [version, setVersion] = useState(0);
   const status = useResource<StatusResponse>("/api/status", version);
@@ -127,6 +134,7 @@ export function App() {
     startJob,
     openSignIn: () => setSignInOpen(true),
     notify,
+    configureSource,
   };
 
   const playlistMatch = /^\/playlists\/([\w-]+)$/.exec(path);

@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { parse } from "yaml";
 import type { Tag, TagSource } from "../db.ts";
 import { DEFAULT_TAG_MAP, type TagMap } from "./defaultTagMap.ts";
 
@@ -21,10 +19,9 @@ export function normalizeTag(tag: string): string {
     .trim();
 }
 
-/** Built-in map, with any section present in the user's YAML file replacing the default one. */
-export function loadTagMap(path?: string): TagMap {
-  if (!path || !existsSync(path)) return DEFAULT_TAG_MAP;
-  const override = (parse(readFileSync(path, "utf8")) ?? {}) as Partial<TagMap>;
+/** The built-in map, with any section the caller supplies replacing the default one. */
+export function mergeTagMap(override: Partial<TagMap> | null | undefined): TagMap {
+  if (!override) return DEFAULT_TAG_MAP;
   return {
     families: override.families ?? DEFAULT_TAG_MAP.families,
     subgenres: override.subgenres ?? DEFAULT_TAG_MAP.subgenres,

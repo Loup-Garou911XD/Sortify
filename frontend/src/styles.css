@@ -722,6 +722,7 @@ li:hover > .row-btn,
   gap: 2px;
 }
 .source-row {
+  width: 100%;
   display: grid;
   grid-template-columns: 6px minmax(0, 1fr);
   gap: 9px;
@@ -747,7 +748,7 @@ li:hover > .row-btn,
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.source-row.on .source-state {
+.source-row-item.on .source-state {
   color: var(--good);
 }
 .source-help {

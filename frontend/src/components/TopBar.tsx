@@ -4,6 +4,7 @@ import { api } from "../api.ts";
 import type { Theme } from "../hooks.ts";
 import {
   IconClose,
+  IconInbox,
   IconMenu,
   IconMonitor,
   IconMoon,
@@ -12,6 +13,57 @@ import {
   IconSun,
 } from "./icons.tsx";
 import { Button, Menu, MenuItem } from "./ui.tsx";
+
+/**
+ * One row of the Connections panel. It is a plain block normally, and a button when the shell
+ * passed `configureSource`, so the local app shows exactly what it always has.
+ */
+function SourceRow({
+  on,
+  name,
+  state,
+  help,
+  keys = [],
+  onClick,
+}: {
+  on: boolean;
+  name: string;
+  state?: string;
+  help: string;
+  keys?: string[];
+  onClick?: (() => void) | undefined;
+}) {
+  const body = (
+    <>
+      <span className={on ? "dot dot-on" : "dot dot-off"} aria-hidden />
+      <div>
+        <div className="source-name">
+          {name}
+          {state && <span className="source-state">{state}</span>}
+        </div>
+        <p className="source-help">{help}</p>
+        {keys.length > 0 && (
+          <div className="source-keys">
+            {keys.map((v) => (
+              <code key={v}>{v}</code>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+  return (
+    <li className={on ? "source-row-item on" : "source-row-item"}>
+      {onClick ? (
+        <button type="button" className="source-row source-row-button" onClick={onClick}>
+          {body}
+        </button>
+      ) : (
+        <div className="source-row">{body}</div>
+      )}
+    </li>
+  );
+}
 
 /** Each theme names the one the toggle moves to, so a single button reaches all three. */
 const THEMES: Record<Theme, { label: string; Glyph: typeof IconSun; next: Theme }> = {
@@ -27,7 +79,8 @@ export function TopBar({
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
-  const { status, theme, setTheme, openSignIn, refresh, notify, navigate } = useApp();
+  const { status, theme, setTheme, openSignIn, refresh, notify, navigate, configureSource } =
+    useApp();
   const [signingOut, setSigningOut] = useState(false);
 
   const sources = status?.sources ?? [];
@@ -101,17 +154,22 @@ export function TopBar({
                   <span className="menu-count">{signedIn ? "Connected" : "Not connected"}</span>
                 </div>
                 <ul className="source-list">
-                  <li className={signedIn ? "source-row on" : "source-row"}>
-                    <span className={signedIn ? "dot dot-on" : "dot dot-off"} aria-hidden />
-                    <div>
-                      <div className="source-name">YouTube</div>
-                      <p className="source-help">
-                        {signedIn
-                          ? "Reads your playlists and creates new ones. It never changes or deletes existing playlists."
-                          : "Needed to add playlists and to create new ones."}
-                      </p>
-                    </div>
-                  </li>
+                  <SourceRow
+                    on={signedIn}
+                    name="YouTube"
+                    help={
+                      signedIn
+                        ? "Reads your playlists and creates new ones. It never changes or deletes existing playlists."
+                        : "Needed to add playlists and to create new ones."
+                    }
+                    onClick={
+                      configureSource &&
+                      (() => {
+                        close();
+                        configureSource("account");
+                      })
+                    }
+                  />
                 </ul>
                 {signedIn ? (
                   <MenuItem
@@ -149,29 +207,38 @@ export function TopBar({
                 </div>
                 <ul className="source-list">
                   {sources.map((s) => (
-                    <li key={s.id} className={s.configured ? "source-row on" : "source-row"}>
-                      <span className={s.configured ? "dot dot-on" : "dot dot-off"} aria-hidden />
-                      <div>
-                        <div className="source-name">
-                          {s.label}
-                          <span className="source-state">{s.configured ? "Ready" : "Off"}</span>
-                        </div>
-                        <p className="source-help">{s.help}</p>
-                        {!s.configured && s.envVars.length > 0 && (
-                          <div className="source-keys">
-                            {s.envVars.map((v) => (
-                              <code key={v}>{v}</code>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </li>
+                    <SourceRow
+                      key={s.id}
+                      on={s.configured}
+                      name={s.label}
+                      state={s.configured ? "Ready" : "Off"}
+                      help={s.help}
+                      keys={configureSource ? [] : s.envVars}
+                      onClick={
+                        configureSource &&
+                        (() => {
+                          close();
+                          configureSource(s.id);
+                        })
+                      }
+                    />
                   ))}
                 </ul>
-                {ready < sources.length && (
+                {ready < sources.length && !configureSource && (
                   <p className="menu-foot">
                     Set the keys above, then restart <code>sortify ui</code>.
                   </p>
+                )}
+                {configureSource && (
+                  <MenuItem
+                    onClick={() => {
+                      close();
+                      configureSource("import");
+                    }}
+                  >
+                    <IconInbox size={15} />
+                    Import keys from a .env file
+                  </MenuItem>
                 )}
               </>
             )}

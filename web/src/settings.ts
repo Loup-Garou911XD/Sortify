@@ -52,6 +52,91 @@ export const KEYS = [
 
 export type KeyId = (typeof KEYS)[number]["id"];
 
+/**
+ * What each row of the Connections panel opens: what the source gives you, how to get its key,
+ * and which fields to show. Keyed by provider id, plus "account" for the Google client itself.
+ * `{origin}` and `{redirect}` are filled in with this deploy's own URLs.
+ */
+export interface SourceGuide {
+  title: string;
+  blurb: string;
+  docsUrl?: string;
+  docsLabel?: string;
+  steps: string[];
+  fields: KeyId[];
+}
+
+export const SOURCE_GUIDES: Record<string, SourceGuide> = {
+  account: {
+    title: "YouTube account",
+    blurb:
+      "Sortify reads your playlists and creates new ones through your own Google OAuth client. It never changes or deletes existing playlists.",
+    docsUrl: "https://console.cloud.google.com/apis/credentials",
+    docsLabel: "Google Cloud credentials",
+    steps: [
+      "Enable YouTube Data API v3 for your Google Cloud project.",
+      "Create an OAuth client ID of type Web application.",
+      "Under Authorized JavaScript origins add {origin} — an origin cannot contain a path.",
+      "Under Authorized redirect URIs add {redirect}, which must match exactly, trailing slash included.",
+      "While the app is in testing mode, add your own Google account as a test user.",
+    ],
+    fields: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+  },
+  discogs: {
+    title: "Discogs",
+    blurb: "The main subgenre source: release styles such as Synthwave or Deep House.",
+    docsUrl: "https://www.discogs.com/settings/developers",
+    docsLabel: "Discogs developer settings",
+    steps: [
+      "Sign in to Discogs and open Settings → Developers.",
+      "Press Generate new token and copy the personal access token.",
+    ],
+    fields: ["DISCOGS_TOKEN"],
+  },
+  lastfm: {
+    title: "Last.fm",
+    blurb: "The only mood source, and subgenres when Discogs has none.",
+    docsUrl: "https://www.last.fm/api/account/create",
+    docsLabel: "Create a Last.fm API account",
+    steps: [
+      "Fill in the form with any application name.",
+      "Copy the API key. The shared secret is not needed.",
+    ],
+    fields: ["LASTFM_API_KEY"],
+  },
+  spotify: {
+    title: "Spotify",
+    blurb: "Detailed artist genres, for example desi hip hop or punjabi pop.",
+    docsUrl: "https://developer.spotify.com/dashboard",
+    docsLabel: "Spotify developer dashboard",
+    steps: [
+      "Press Create app and give it any name and description.",
+      "No redirect URI is needed: Sortify uses the client credentials flow.",
+      "Open the app's settings and copy the client ID and client secret.",
+    ],
+    fields: ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"],
+  },
+  itunes: {
+    title: "iTunes",
+    blurb:
+      "Store genres such as Punjabi Pop and Bollywood, asked only when nothing else found a subgenre.",
+    steps: ["No key needed. Set a two-letter country to search a different store than the US."],
+    fields: ["ITUNES_COUNTRY"],
+  },
+  musicbrainz: {
+    title: "MusicBrainz",
+    blurb: "Corrects artist and title spelling before the other sources are asked.",
+    steps: ["No key needed. It is always on."],
+    fields: [],
+  },
+  youtube: {
+    title: "YouTube topics",
+    blurb: "Broad genres from YouTube's own topic labels.",
+    steps: ["No key needed. These arrive free whenever a playlist is fetched."],
+    fields: [],
+  },
+};
+
 const STORAGE_KEY = "sortify-keys";
 
 function read(): Record<string, string> {
@@ -74,12 +159,13 @@ export function getKey(id: KeyId): string {
   return cached[id] ?? "";
 }
 
-/** Stores the given keys, dropping any that were blanked out. */
+/** Merges the given keys over the stored ones, dropping any that were blanked out. */
 export function saveKeys(next: Record<string, string>): void {
-  const cleaned: Record<string, string> = {};
+  const cleaned: Record<string, string> = { ...cached };
   for (const [k, v] of Object.entries(next)) {
     const trimmed = v.trim();
     if (trimmed) cleaned[k] = trimmed;
+    else delete cleaned[k];
   }
   cached = cleaned;
   try {
@@ -95,6 +181,112 @@ export function saveKeys(next: Record<string, string>): void {
  */
 export function envVars(): Record<string, string | undefined> {
   return { ...cached };
+}
+
+/** Recognised names. A `VITE_` prefix is tolerated, since some toolchains add one. */
+const ALIASES: Record<string, KeyId> = {};
+for (const k of KEYS) {
+  ALIASES[k.id] = k.id;
+  ALIASES[`VITE_${k.id}`] = k.id;
+}
+
+/** The backend's OAuth client, which is a JSON blob rather than a plain key. */
+const CLIENT_SECRETS = "SORTIFY_CLIENT_SECRETS";
+
+export interface ParsedEnv {
+  keys: Partial<Record<KeyId, string>>;
+  /** Labels of the keys that were recognised, for showing what an import would do. */
+  found: string[];
+  /** Names that were parsed but mean nothing here. */
+  ignored: string[];
+  /** Set when the file held a Desktop-app OAuth client, which a browser cannot use. */
+  desktopClient: boolean;
+  /** Set when SORTIFY_CLIENT_SECRETS named a file rather than holding the JSON itself. */
+  clientSecretsPath: boolean;
+}
+
+function unquote(raw: string): string {
+  const value = raw.trim();
+  const quote = value[0];
+  if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length > 1) {
+    const inner = value.slice(1, -1);
+    // Only double quotes carry escapes, matching how dotenv files are normally read.
+    return quote === '"' ? inner.replace(/\\n/g, "\n").replace(/\\(["\\])/g, "$1") : inner;
+  }
+  // An unquoted value ends at an inline comment.
+  return value.split(" #")[0]?.trim() ?? "";
+}
+
+/**
+ * Reads the text of a `.env` file.
+ *
+ * Node has `process.loadEnvFile` and the backend uses it; browsers have nothing equivalent, so
+ * this covers the same ground: comments, blank lines, `export` prefixes, quoted values. A
+ * Google client stored as `SORTIFY_CLIENT_SECRETS` JSON is unwrapped when it is a Web
+ * application client, and reported when it is a Desktop one.
+ */
+export function parseEnv(text: string): ParsedEnv {
+  const labels = new Map(KEYS.map((k) => [k.id as string, k.label]));
+  const keys: Partial<Record<KeyId, string>> = {};
+  const found: string[] = [];
+  const ignored: string[] = [];
+  let desktopClient = false;
+  let clientSecretsPath = false;
+
+  for (const line of text.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const trimmed = line.trim().replace(/^export\s+/, "");
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 1) continue;
+    const name = trimmed.slice(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
+    const value = unquote(trimmed.slice(eq + 1));
+    if (!value) continue;
+
+    if (name === CLIENT_SECRETS) {
+      const client = readClientSecrets(value);
+      if (client === "desktop") desktopClient = true;
+      else if (client === null) {
+        clientSecretsPath = true;
+        ignored.push(name);
+      } else if (client) {
+        keys.GOOGLE_CLIENT_ID = client.id;
+        keys.GOOGLE_CLIENT_SECRET = client.secret;
+        found.push("Google client ID", "Google client secret");
+      }
+      continue;
+    }
+
+    const id = ALIASES[name];
+    if (id) {
+      keys[id] = value;
+      found.push(labels.get(id) ?? id);
+    } else ignored.push(name);
+  }
+  return {
+    keys,
+    found: [...new Set(found)],
+    ignored: [...new Set(ignored)],
+    desktopClient,
+    clientSecretsPath,
+  };
+}
+
+/** `"desktop"` when the client cannot be used from a browser, `null` when it is not JSON. */
+function readClientSecrets(value: string): { id: string; secret: string } | "desktop" | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    // A file path, which a browser cannot read.
+    return null;
+  }
+  const root = parsed as { web?: Record<string, string>; installed?: Record<string, string> };
+  if (root.installed) return "desktop";
+  const web = root.web;
+  return web?.client_id && web.client_secret
+    ? { id: web.client_id, secret: web.client_secret }
+    : null;
 }
 
 /** Whether sign-in can even be attempted. */

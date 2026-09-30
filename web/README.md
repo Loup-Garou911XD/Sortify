@@ -14,6 +14,11 @@ normally calls `sortify ui` over HTTP, and `web/src/api.ts` takes its place, ans
 routes in the page by calling the same domain code the server calls (`enrichPlaylist`,
 `planGroups`, `applyRun`, the provider registry). Nothing in `frontend/` or `backend/` is copied.
 
+The one thing this build asks of the shared UI is an optional `configureSource` prop on `App`.
+When it is passed, the Connections panel turns each row into a button and calls back with the
+source to configure; `web/src/KeyDialog.tsx` answers with that source's setup. The local app
+passes nothing and its rows stay plain text, exactly as before.
+
 | Local (`sortify ui`) | GitHub Pages |
 | --- | --- |
 | SQLite via `node:sqlite` | in-memory model flushed to IndexedDB (`src/store.ts`) |
@@ -25,11 +30,25 @@ routes in the page by calling the same domain code the server calls (`enrichPlay
 1. **Deploy it.** Settings → Pages → Source: GitHub Actions. Push to `main`; the workflow in
    `.github/workflows/pages.yml` builds and publishes it.
 2. **Create a Google OAuth client.** In Google Cloud Console, enable **YouTube Data API v3**,
-   then create an OAuth client ID of type **Web application**. Add your Pages URL (for example
-   `https://<user>.github.io/Sortify/`) to *both* Authorized JavaScript origins and Authorized
-   redirect URIs. Add yourself as a test user while the app is in testing mode.
-3. **Open the site and press Settings.** Paste the client ID and secret, plus any provider keys
-   you have (Discogs, Last.fm, Spotify). MusicBrainz, iTunes and YouTube topics need no key.
+   then create an OAuth client ID of type **Web application**. The two fields take different
+   values, and neither accepts the other's:
+
+   | Field | Value | Rule |
+   | --- | --- | --- |
+   | Authorized JavaScript origins | `https://<user>.github.io` | An origin only: scheme, host, port. A path is rejected. |
+   | Authorized redirect URIs | `https://<user>.github.io/Sortify/` | Matched exactly, path and trailing slash included. |
+
+   The Settings dialog prints both values for your own deploy, so copy them from there. Add
+   yourself as a test user while the app is in testing mode.
+3. **Open the site and use Connections in the top bar.** If your keys already sit in a `.env`
+   file, **Import keys from a .env file** at the bottom of that panel reads them all at once,
+   under the same names the backend uses, and unwraps a Web application client stored as
+   `SORTIFY_CLIENT_SECRETS` JSON. File pickers hide dotfiles, so pasting the contents works too.
+   Otherwise, enter them one source at a time: Every row there is a button: pick
+   **YouTube** to paste the Google client ID and secret, or a tag source to see how to get its key
+   and enter it. The YouTube dialog prints the exact origin and redirect URI for your own deploy,
+   so you can copy them straight into Google Cloud Console. MusicBrainz, iTunes and YouTube topics
+   need no key and say so.
 4. **Connect YouTube**, then use it exactly as you would locally.
 
 ## What you are trading away
@@ -44,10 +63,9 @@ routes in the page by calling the same domain code the server calls (`enrichPlay
   a descriptive one; a static page cannot, and sends the browser's own instead.
 - **The cache is per-browser.** Clearing site data clears your playlists and the lookup cache.
   Nothing is lost on YouTube, but tagging has to run again.
-- Two messages come from the shared UI and read oddly here: the sign-in dialog and the tag
-  sources panel both mention setting environment variables and restarting `sortify ui`. Use
-  Settings instead. Fixing the wording means editing `frontend/`, which this build deliberately
-  leaves alone.
+- The sign-in dialog still describes the local setup: it mentions `SORTIFY_CLIENT_SECRETS` and
+  restarting `sortify ui`. Use Connections → YouTube instead. The tag sources panel no longer has
+  that problem — it adapts when the shell can edit its own keys.
 
 ## Running it locally
 
@@ -56,6 +74,9 @@ npm run dev:web      # Vite on :5173, no backend needed
 npm run build:web    # static site into web/dist
 SORTIFY_BASE=/Sortify/ npm run build:web   # for a project page
 ```
+
+Keys live in the browser, not in the build, so a dev server and a deploy are built from exactly
+the same bytes. Import your `.env` once through Connections and it persists per browser.
 
 `web/dist/404.html` is a copy of `index.html`: GitHub Pages serves it for any path it does not
 recognise, which is what lets a deep link like `/runs/2` load the app.

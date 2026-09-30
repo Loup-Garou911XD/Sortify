@@ -1,4 +1,4 @@
-import type { Store, Tag, Track } from "../db.ts";
+import type { Cache, Tag, Track } from "../db.ts";
 import type { RawTag, TagMapper } from "../tagging/mapper.ts";
 import { BudgetExhaustedError, LookupFailedError } from "./lookup.ts";
 import type { ProviderClient, TrackQuery } from "./provider.ts";
@@ -131,7 +131,7 @@ export interface EnrichSummary {
  * loses nothing.
  */
 export async function enrichPlaylist(
-  store: Store,
+  store: Cache,
   playlistId: string,
   enrichers: Enrichers,
   options: {

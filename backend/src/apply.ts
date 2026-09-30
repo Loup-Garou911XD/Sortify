@@ -1,4 +1,4 @@
-import type { RunGroup, Store } from "./db.ts";
+import type { Cache, RunGroup } from "./db.ts";
 import { QuotaExceededError, YouTubeApiError, type YouTubeClient } from "./youtube/client.ts";
 
 export type Privacy = "private" | "unlisted" | "public";
@@ -51,7 +51,7 @@ export const groupMarker = (group: RunGroup): string =>
  * - a group with unconfirmed additions is checked against the playlist's current contents.
  */
 export async function applyRun(
-  store: Store,
+  store: Cache,
   yt: PlaylistWriter,
   runId: number,
   options: ApplyOptions,

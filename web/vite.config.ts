@@ -15,6 +15,9 @@ const webApi = resolve(here, "src/api.ts");
  * normally talks to `sortify ui` over HTTP, and here it is replaced by `web/src/api.ts`, which
  * runs the same domain code in the page. Nothing in `frontend/` or `backend/` is modified.
  *
+ * Nothing from the environment is inlined into the bundle: keys are entered in the running app
+ * and kept in the browser, so a build can never carry a secret into published JavaScript.
+ *
  * Set SORTIFY_BASE to the path the site is served from — for a project page that is the repo
  * name, e.g. `/Sortify/`. It defaults to `/` for a user site or a custom domain.
  */

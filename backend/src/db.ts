@@ -156,6 +156,13 @@ const RUN_COLUMNS = `run_id AS runId, source_playlist_id AS sourcePlaylistId, di
 const now = (): string => new Date().toISOString();
 
 /** Thin typed layer over the SQLite cache. Every stage reads and writes through it. */
+/**
+ * What every stage outside this file needs from the cache: `Store` minus its SQLite handle.
+ * A mapped type drops private members, so an alternative implementation (the browser app's
+ * IndexedDB store) can satisfy this structurally and be typechecked against it.
+ */
+export type Cache = Omit<Store, "db" | "close">;
+
 export class Store {
   readonly db: DatabaseSync;
   private readonly statements = new Map<string, StatementSync>();

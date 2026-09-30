@@ -37,7 +37,8 @@ export class Spotify implements ProviderClient {
 
   constructor(deps: LookupDeps, clientId: string, clientSecret: string) {
     this.fetchImpl = deps.fetch ?? fetch;
-    this.credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+    // btoa, not Buffer: this module also runs in the browser build, and both are ASCII.
+    this.credentials = btoa(`${clientId}:${clientSecret}`);
     this.http = new ServiceClient(deps, {
       name: "Spotify",
       source: this.id,

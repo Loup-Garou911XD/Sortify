@@ -1,7 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadTagMap, normalizeTag, TagMapper } from "../src/tagging/mapper.ts";
+import { normalizeTag, TagMapper } from "../src/tagging/mapper.ts";
+import { loadTagMap } from "../src/tagging/tagMapFile.ts";
 import { authState } from "../src/youtube/auth.ts";
 import { tempDir, testConfig } from "./helpers.ts";
 

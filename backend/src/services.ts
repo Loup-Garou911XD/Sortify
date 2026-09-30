@@ -3,7 +3,8 @@ import type { Store } from "./db.ts";
 import { Budget, type LookupDeps } from "./enrich/lookup.ts";
 import type { Enrichers } from "./enrich/pipeline.ts";
 import { createProviderClients } from "./enrich/providers.ts";
-import { loadTagMap, TagMapper } from "./tagging/mapper.ts";
+import { TagMapper } from "./tagging/mapper.ts";
+import { loadTagMap } from "./tagging/tagMapFile.ts";
 import { loadAuthClient } from "./youtube/auth.ts";
 import { YouTubeClient } from "./youtube/client.ts";
 

@@ -194,7 +194,7 @@ const routes: [string, RegExp, Handler][] = [
       hasClientSecrets: hasGoogleClient(),
       clientSecretsError: hasGoogleClient()
         ? null
-        : "Add your Google client ID and secret in Settings.",
+        : "Open Connections in the top bar and pick YouTube to add your Google client ID and secret.",
       signedIn: isSignedIn(),
       sources: providerStatuses(envVars()),
       dailyQuota: DAILY_QUOTA,

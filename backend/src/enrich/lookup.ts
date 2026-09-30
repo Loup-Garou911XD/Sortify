@@ -1,4 +1,4 @@
-import type { Store } from "../db.ts";
+import type { Cache } from "../db.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export type Sleep = (ms: number) => Promise<void>;
@@ -70,7 +70,7 @@ export class RateLimiter {
 }
 
 export interface LookupDeps {
-  store: Store;
+  store: Cache;
   budget: Budget;
   userAgent: string;
   fetch?: FetchLike;

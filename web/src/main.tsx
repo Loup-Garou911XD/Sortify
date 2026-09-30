@@ -4,10 +4,11 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../../frontend/src/App.tsx";
 import "../../frontend/src/styles.css";
-import "./settings.css";
+import "./web.css";
 import { boot } from "./api.ts";
 import { completeAuth } from "./auth.ts";
-import { Settings } from "./Settings.tsx";
+import { ImportDialog } from "./ImportDialog.tsx";
+import { KeyDialog } from "./KeyDialog.tsx";
 import { BrowserStore } from "./store.ts";
 
 /**
@@ -36,12 +37,27 @@ async function handleOAuthRedirect(): Promise<boolean> {
 }
 
 function Root() {
-  // Saving keys changes what /api/status reports, so remount the app to pick them up.
+  // Which dialog is open: a provider id, "account" for the Google client, or "import".
+  const [editing, setEditing] = useState<string | null>(null);
+  // Saving a key changes what /api/status reports, so remount the app to pick it up.
   const [generation, setGeneration] = useState(0);
   return (
     <>
-      <App key={generation} />
-      <Settings onSaved={() => setGeneration((g) => g + 1)} />
+      <App key={generation} configureSource={setEditing} />
+      {editing === "import" && (
+        <ImportDialog
+          onClose={() => setEditing(null)}
+          onSaved={() => setGeneration((g) => g + 1)}
+        />
+      )}
+      {editing && editing !== "import" && (
+        <KeyDialog
+          key={editing}
+          sourceId={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => setGeneration((g) => g + 1)}
+        />
+      )}
     </>
   );
 }

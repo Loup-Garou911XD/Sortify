@@ -1,4 +1,4 @@
-import type { Store } from "../db.ts";
+import type { Cache } from "../db.ts";
 import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
 
 /** Broad labels, so they only matter when no other provider found a subgenre. */
@@ -13,9 +13,9 @@ const GENERIC = new Set(["Music"]);
  */
 export class YouTubeTopics implements ProviderClient {
   readonly id = "youtube";
-  private readonly store: Store;
+  private readonly store: Cache;
 
-  constructor(store: Store) {
+  constructor(store: Cache) {
     this.store = store;
   }
 
