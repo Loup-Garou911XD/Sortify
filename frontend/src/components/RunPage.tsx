@@ -72,11 +72,17 @@ export function RunPage({ runId }: { runId: number }) {
             {timeAgo(run.createdAt)} · {fmt(run.quotaUsed)} quota units used so far
           </p>
         </div>
-        {neverApplied && !applyingThis && (
+        {!applyingThis && (
           <div className="page-actions">
             {confirmDelete ? (
               <>
-                <span className="muted">Delete this plan?</span>
+                <span className="muted">
+                  Delete this plan?
+                  {!neverApplied &&
+                    ` Its ${plural(groups.length - toCreate, "playlist")} stay on YouTube${
+                      run.status === "done" ? "" : ", and the rest can't be resumed"
+                    }.`}
+                </span>
                 <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
                   Keep
                 </Button>
@@ -191,6 +197,9 @@ export function RunPage({ runId }: { runId: number }) {
               <th className="num">Tracks</th>
               <th className="progress-col">Added</th>
               <th>On YouTube</th>
+              <th title="Temporary youtube.com playlists: no quota or sign-in needed, 50 tracks per link">
+                Play without quota
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -222,11 +231,41 @@ export function RunPage({ runId }: { runId: number }) {
                     <span className="muted">Not created yet</span>
                   )}
                 </td>
+                <td>
+                  <WatchLinks name={g.name} links={g.watchLinks} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
     </div>
+  );
+}
+
+/** One link per 50 tracks; YouTube opens each as a temporary playlist. */
+function WatchLinks({ name, links }: { name: string; links: string[] }) {
+  if (links.length === 0) return <span className="muted">No tracks</span>;
+  if (links.length === 1) {
+    return (
+      <a href={links[0]} target="_blank" rel="noreferrer">
+        Play
+      </a>
+    );
+  }
+  return (
+    <span className="watch-links">
+      {links.map((link, i) => (
+        <a
+          key={link}
+          href={link}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Play ${name}, part ${i + 1} of ${links.length}`}
+        >
+          {i === 0 ? "Play 1" : i + 1}
+        </a>
+      ))}
+    </span>
   );
 }

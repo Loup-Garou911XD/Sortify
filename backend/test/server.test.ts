@@ -188,6 +188,10 @@ describe("api", () => {
     });
     expect(created.status).toBe(200);
     const runId = created.body.runId;
+    const planned = await api<RunDetail>(`/api/runs/${runId}`);
+    expect(planned.body.groups[0]?.watchLinks).toEqual([
+      "https://www.youtube.com/watch_videos?video_ids=a,b",
+    ]);
 
     const started = await api<JobView>(`/api/runs/${runId}/apply`, {
       method: "POST",
@@ -206,8 +210,16 @@ describe("api", () => {
 
     const detail = await api<RunDetail>(`/api/runs/${runId}`);
     expect(detail.body.run).toMatchObject({ status: "done", total: 2, written: 2, groupCount: 1 });
-    const del = await api(`/api/runs/${runId}`, { method: "DELETE" });
-    expect(del.status).toBe(409);
+    // Deleting an applied run keeps its playlist on YouTube, and its id is never handed out again,
+    // so a later run cannot adopt that playlist by its description marker.
+    expect((await api(`/api/runs/${runId}`, { method: "DELETE" })).status).toBe(200);
+    expect((await api(`/api/runs/${runId}`)).status).toBe(404);
+    expect(yt.created).toHaveLength(1);
+    const next = await api<{ runId: number }>("/api/playlists/PL1/runs", {
+      method: "POST",
+      body: { dimension: "subgenre", minSize: 1, groups: [{ name: "A", videoIds: ["a"] }] },
+    });
+    expect(next.body.runId).toBeGreaterThan(runId);
   });
 
   it("rejects plans with unknown videos or duplicate names", async () => {

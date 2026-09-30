@@ -69,6 +69,8 @@ sortify enrich PL...                                            # tag tracks; re
 sortify plan PL... --by subgenre --min-size 5                   # preview; writes nothing
 sortify apply <run-id>                                          # create playlists (asks first)
 sortify status [run-id]                                         # progress of runs
+sortify links <run-id>                                          # youtube.com links to play each group (no quota)
+sortify delete <run-id>                                         # delete a saved plan (YouTube playlists stay)
 ```
 
 - `--by` is `subgenre`, `mood` or `type`. A track goes into **every** group it matches; `--max-groups N` caps that.

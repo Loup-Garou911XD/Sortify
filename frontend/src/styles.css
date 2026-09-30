@@ -940,6 +940,11 @@ li:hover > .icon-btn,
 .inline-progress .progress {
   flex: 1;
 }
+.watch-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
 
 /* ---------- run ---------- */
 

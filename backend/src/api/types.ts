@@ -112,6 +112,8 @@ export interface RunGroupView {
   targetPlaylistId: string | null;
   total: number;
   written: number;
+  /** Temporary youtube.com playlists of the group's tracks (no quota; 50 videos per link). */
+  watchLinks: string[];
 }
 
 export interface RunDetail {

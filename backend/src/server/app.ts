@@ -32,6 +32,7 @@ import {
   signOut,
 } from "../youtube/auth.ts";
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
+import { watchLinks } from "../youtube/watchLinks.ts";
 import { JobBusyError, JobRunner } from "./jobs.ts";
 
 export type YouTubeApi = PlaylistReader & PlaylistWriter;
@@ -405,6 +406,7 @@ export function createApp(deps: AppDeps) {
             targetPlaylistId: g.targetPlaylistId,
             total: g.total,
             written: g.written,
+            watchLinks: watchLinks(store.groupItems(g.groupId).map((i) => i.videoId)),
           })),
         };
       },
@@ -413,10 +415,9 @@ export function createApp(deps: AppDeps) {
       "DELETE",
       /^\/api\/runs\/(\d+)$/,
       ([id = ""]) => {
+        // Playlists it already created stay on YouTube. Run ids are never reused, so a later run
+        // cannot mistake them for its own by their description marker.
         const run = requireRun(id);
-        if (store.runGroups(run.runId).some((g) => g.targetPlaylistId !== null)) {
-          throw new HttpError(409, "This run already created playlists on YouTube");
-        }
         if (jobs.current()?.status === "running" && jobs.current()?.runId === run.runId) {
           throw new HttpError(409, "This run is being applied");
         }

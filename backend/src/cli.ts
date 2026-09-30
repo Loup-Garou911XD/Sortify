@@ -14,6 +14,7 @@ import { startServer } from "./server/index.ts";
 import { createEnrichers, fetchPlaylist, youtubeFor } from "./services.ts";
 import { authorize } from "./youtube/auth.ts";
 import { parsePlaylistId } from "./youtube/playlistUrl.ts";
+import { WATCH_LINK_SIZE, watchLinks } from "./youtube/watchLinks.ts";
 
 const out = (line = ""): void => {
   process.stdout.write(`${line}\n`);
@@ -312,6 +313,62 @@ program
           }),
         ),
       );
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("delete")
+  .description("Delete a saved plan (playlists it already created stay on YouTube)")
+  .argument("<run-id>", "run ID", positiveInt)
+  .option("-y, --yes", "do not ask for confirmation")
+  .action(async (runId: number, opts: { yes?: boolean }) => {
+    const config = loadConfig();
+    const store = openStore(config);
+    try {
+      const run = store.getRun(runId);
+      if (!run) throw new Error(`No run with id ${runId}. See \`sortify status\`.`);
+      const created = store.runGroups(runId).filter((g) => g.targetPlaylistId !== null).length;
+      if (created > 0) {
+        out(
+          `Run ${runId} created ${created} playlist${created === 1 ? "" : "s"} on YouTube; they are kept.`,
+        );
+        if (run.status !== "done") out("The unfinished part of this run cannot be resumed after.");
+      }
+      if (!opts.yes && !(await confirm(`Delete run ${runId}?`))) {
+        out("Cancelled.");
+        return;
+      }
+      store.deleteRun(runId);
+      out(`Deleted run ${runId}.`);
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("links")
+  .description(
+    `Print youtube.com links that play each planned playlist (no quota, no sign-in; ${WATCH_LINK_SIZE} tracks per link)`,
+  )
+  .argument("<run-id>", "run ID from `sortify plan`", positiveInt)
+  .action((runId: number) => {
+    const config = loadConfig();
+    const store = openStore(config);
+    try {
+      if (!store.getRun(runId)) throw new Error(`No run with id ${runId}. See \`sortify status\`.`);
+      for (const g of store.runGroups(runId)) {
+        const videoIds = store.groupItems(g.groupId).map((i) => i.videoId);
+        const links = watchLinks(videoIds);
+        if (links.length === 0) continue;
+        out(`${g.name} (${videoIds.length} tracks)`);
+        links.forEach((link, i) => {
+          out(links.length === 1 ? `  ${link}` : `  ${i + 1}/${links.length} ${link}`);
+        });
+        out();
+      }
+      out("Each link opens a temporary playlist on YouTube; save it there to keep it.");
     } finally {
       store.close();
     }

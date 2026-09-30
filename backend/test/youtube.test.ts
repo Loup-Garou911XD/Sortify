@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseIsoDuration, QuotaExceededError, YouTubeClient } from "../src/youtube/client.ts";
 import { parsePlaylistId } from "../src/youtube/playlistUrl.ts";
+import { watchLinks } from "../src/youtube/watchLinks.ts";
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status });
@@ -96,5 +97,23 @@ describe("YouTubeClient", () => {
     });
     await yt.addToPlaylist("PL1", "v1");
     expect(calls).toBe(3);
+  });
+});
+
+describe("watchLinks", () => {
+  it("splits videos into links of at most 50, in order", () => {
+    const ids = Array.from({ length: 120 }, (_, i) => `v${i}`);
+    const links = watchLinks(ids);
+    expect(links).toHaveLength(3);
+    expect(links[0]).toBe(
+      `https://www.youtube.com/watch_videos?video_ids=${ids.slice(0, 50).join(",")}`,
+    );
+    expect(links[2]).toBe(
+      `https://www.youtube.com/watch_videos?video_ids=${ids.slice(100).join(",")}`,
+    );
+  });
+
+  it("returns no links for no videos", () => {
+    expect(watchLinks([])).toEqual([]);
   });
 });

@@ -472,7 +472,7 @@ export class Store {
     ).all(runId) as unknown as RunGroupProgress[];
   }
 
-  /** Removes a run and its groups. Callers must only do this for runs never applied. */
+  /** Removes a run and its groups from the cache; playlists it created on YouTube are left alone. */
   deleteRun(runId: number): void {
     this.tx(() => {
       this.prep(
