@@ -32,12 +32,6 @@ export const IconPlus = (p: Props) => (
   </Icon>
 );
 
-export const IconCheck = (p: Props) => (
-  <Icon {...p}>
-    <path d="m20 6-11 11-5-5" />
-  </Icon>
-);
-
 export const IconClose = (p: Props) => (
   <Icon {...p}>
     <path d="M18 6 6 18M6 6l12 12" />
@@ -147,6 +141,13 @@ export const IconCheckCircle = (p: Props) => (
   <Icon {...p}>
     <circle cx="12" cy="12" r="9" />
     <path d="m8.4 12.2 2.4 2.4 4.8-4.8" />
+  </Icon>
+);
+
+export const IconSignIn = (p: Props) => (
+  <Icon {...p}>
+    <path d="M9.5 7.5v-2A1.5 1.5 0 0 1 11 4h7.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H11a1.5 1.5 0 0 1-1.5-1.5v-2" />
+    <path d="M3 12h11.5m0 0-3.2-3.2M14.5 12l-3.2 3.2" />
   </Icon>
 );
 

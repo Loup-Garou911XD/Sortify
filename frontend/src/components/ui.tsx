@@ -8,14 +8,7 @@ import {
 } from "react";
 import type { Dimension, TrackTagView } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
-import {
-  IconAlert,
-  IconCheck,
-  IconCheckCircle,
-  IconChevronDown,
-  IconInbox,
-  IconInfo,
-} from "./icons.tsx";
+import { IconAlert, IconCheckCircle, IconChevronDown, IconInbox, IconInfo } from "./icons.tsx";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -289,33 +282,10 @@ export function Menu({
   );
 }
 
-/** A plain action, or one choice of a set when `selected` is given. */
-export function MenuItem({
-  children,
-  onClick,
-  selected,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  selected?: boolean;
-}) {
-  if (selected === undefined) {
-    return (
-      <button type="button" className="menu-item" onClick={onClick}>
-        {children}
-      </button>
-    );
-  }
+export function MenuItem({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={selected}
-      className="menu-item"
-      onClick={onClick}
-    >
+    <button type="button" className="menu-item" onClick={onClick}>
       {children}
-      {selected && <IconCheck className="tick" size={14} />}
     </button>
   );
 }

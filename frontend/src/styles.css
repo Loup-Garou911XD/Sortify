@@ -303,12 +303,18 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   gap: 9px;
+  height: 32px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border-radius: var(--r-1);
   font-weight: 650;
   font-size: 14.5px;
   letter-spacing: -0.015em;
   color: var(--ink);
+  transition: background var(--fast);
 }
 .brand:hover {
+  background: var(--panel-2);
   text-decoration: none;
 }
 .brand-mark {
@@ -666,6 +672,24 @@ li:hover > .row-btn,
 .menu-label {
   padding: 7px 9px 5px;
 }
+.menu-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.menu-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.menu-foot {
+  margin: 2px 0 4px;
+  padding: 0 9px;
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.4;
+}
 .menu-item {
   display: flex;
   align-items: center;
@@ -682,17 +706,6 @@ li:hover > .row-btn,
 }
 .menu-item:hover {
   background: var(--panel-2);
-}
-.menu-item .tick {
-  margin-left: auto;
-  color: var(--brand);
-}
-.menu-group {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
-  display: grid;
 }
 .menu-sep {
   height: 1px;
@@ -751,12 +764,6 @@ li:hover > .row-btn,
 }
 .source-keys code {
   font-size: 11px;
-}
-
-.account-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
 }
 
 /* ---------- meters and progress ---------- */
