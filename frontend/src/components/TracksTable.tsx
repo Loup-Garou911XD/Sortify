@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { TrackView } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { duration, fmt } from "../hooks.ts";
+import { IconSearch } from "./icons.tsx";
 import { Button, Segmented, TagChips } from "./ui.tsx";
 
 type Filter = "all" | "untagged" | "tagged";
@@ -35,16 +36,19 @@ export function TracksTable({ tracks }: { tracks: TrackView[] }) {
   return (
     <div className="tracks">
       <div className="toolbar">
-        <input
-          type="search"
-          placeholder="Search title, artist or tag"
-          aria-label="Search tracks"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setLimit(PAGE);
-          }}
-        />
+        <span className="search-field">
+          <IconSearch size={15} />
+          <input
+            type="search"
+            placeholder="Search title, artist or tag"
+            aria-label="Search tracks"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setLimit(PAGE);
+            }}
+          />
+        </span>
         <Segmented
           label="Filter tracks"
           value={filter}
@@ -58,62 +62,70 @@ export function TracksTable({ tracks }: { tracks: TrackView[] }) {
             { value: "untagged", label: `No genre or mood (${fmt(untaggedCount)})` },
           ]}
         />
+        <span className="toolbar-spacer" />
+        <span className="small muted tabular">
+          {fmt(Math.min(limit, rows.length))} of {fmt(rows.length)} shown
+        </span>
       </div>
 
       <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th className="num">#</th>
-              <th>Track</th>
-              <th>Subgenre</th>
-              <th>Mood</th>
-              <th>Type</th>
-              <th className="num">Length</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, limit).map(({ t, n }) => (
-              <tr key={t.videoId}>
-                <td className="num muted">{n}</td>
-                <td>
-                  <div className="track-cell">
-                    <a
-                      href={`https://music.youtube.com/watch?v=${t.videoId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={t.title}
-                    >
-                      {t.songTitle ?? t.title}
-                    </a>
-                    <span className="muted">
-                      {t.artist ?? t.channel}
-                      {t.retryProviders.length > 0
-                        ? ` · will retry ${t.retryProviders.map(label).join(", ")}`
-                        : !t.enriched && " · not tagged yet"}
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  <TagChips tags={t.tags} dimension="subgenre" />
-                </td>
-                <td>
-                  <TagChips tags={t.tags} dimension="mood" />
-                </td>
-                <td>
-                  <TagChips tags={t.tags} dimension="type" />
-                </td>
-                <td className="num muted">{duration(t.durationS)}</td>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th className="num">#</th>
+                <th>Track</th>
+                <th>Subgenre</th>
+                <th>Mood</th>
+                <th>Type</th>
+                <th className="num">Length</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && <p className="empty">No tracks match.</p>}
+            </thead>
+            <tbody>
+              {rows.slice(0, limit).map(({ t, n }) => (
+                <tr key={t.videoId}>
+                  <td className="num col-index">{n}</td>
+                  <td>
+                    <div className="track-cell">
+                      <a
+                        href={`https://music.youtube.com/watch?v=${t.videoId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={t.title}
+                      >
+                        {t.songTitle ?? t.title}
+                      </a>
+                      <span className="muted">
+                        {t.artist ?? t.channel}
+                        {t.retryProviders.length > 0
+                          ? ` · will retry ${t.retryProviders.map(label).join(", ")}`
+                          : !t.enriched && " · not tagged yet"}
+                      </span>
+                    </div>
+                  </td>
+                  <td>
+                    <TagChips tags={t.tags} dimension="subgenre" />
+                  </td>
+                  <td>
+                    <TagChips tags={t.tags} dimension="mood" />
+                  </td>
+                  <td>
+                    <TagChips tags={t.tags} dimension="type" />
+                  </td>
+                  <td className="num muted">{duration(t.durationS)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length === 0 && (
+          <p className="empty-row">No tracks match. Try a different search or filter.</p>
+        )}
       </div>
       {rows.length > limit && (
         <div className="more">
           <Button onClick={() => setLimit((l) => l + PAGE)}>
-            Show more ({fmt(rows.length - limit)} left)
+            Show {fmt(Math.min(PAGE, rows.length - limit))} more
           </Button>
         </div>
       )}

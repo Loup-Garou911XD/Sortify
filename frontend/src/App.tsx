@@ -6,15 +6,23 @@ import type {
   StatusResponse,
 } from "../../backend/src/api/types.ts";
 import { api } from "./api.ts";
+import { Home } from "./components/Home.tsx";
 import { JobBar } from "./components/JobBar.tsx";
 import { PlaylistPage } from "./components/PlaylistPage.tsx";
 import { RunPage } from "./components/RunPage.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { SignInDialog } from "./components/SignInDialog.tsx";
+import { Toasts } from "./components/Toasts.tsx";
 import { TopBar } from "./components/TopBar.tsx";
 import { Notice } from "./components/ui.tsx";
-import { Welcome } from "./components/Welcome.tsx";
-import { useInterval, useLocation, useResource } from "./hooks.ts";
+import { type Theme, useInterval, useLocation, useResource, useTheme } from "./hooks.ts";
+
+export type Tone = "good" | "error";
+export interface Toast {
+  id: number;
+  tone: Tone;
+  text: string;
+}
 
 export interface AppState {
   status: StatusResponse | undefined;
@@ -23,11 +31,14 @@ export interface AppState {
   job: JobView | null;
   /** Bumped whenever a background task finishes, so open pages refetch. */
   version: number;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
   navigate: (to: string) => void;
   refresh: () => void;
   /** POSTs an action that starts a background task and begins tracking it. */
   startJob: (path: string, body?: unknown) => Promise<void>;
   openSignIn: () => void;
+  notify: (tone: Tone, text: string) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -38,6 +49,8 @@ export function useApp(): AppState {
   return ctx;
 }
 
+let toastId = 0;
+
 export function App() {
   const [path, navigate] = useLocation();
   const [version, setVersion] = useState(0);
@@ -46,10 +59,26 @@ export function App() {
   const runs = useResource<RunSummary[]>("/api/runs", version);
   const [job, setJob] = useState<JobView | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
-  const [banner, setBanner] = useState<{ tone: "good" | "error"; text: string } | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [theme, setTheme] = useTheme();
   const lastJobStatus = useRef<string | null>(null);
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
+
+  const dismiss = useCallback((id: number) => {
+    setToasts((list) => list.filter((t) => t.id !== id));
+  }, []);
+
+  const notify = useCallback(
+    (tone: Tone, text: string) => {
+      const id = ++toastId;
+      setToasts((list) => [...list, { id, tone, text }]);
+      // Successes announce themselves and leave; errors wait to be read.
+      if (tone === "good") setTimeout(() => dismiss(id), 5000);
+    },
+    [dismiss],
+  );
 
   const pollJob = useCallback(async () => {
     const current = await api<JobView | null>("/api/job").catch(() => null);
@@ -66,14 +95,18 @@ export function App() {
   // Keep progress numbers in the sidebar moving while a task runs.
   useInterval(refresh, 4000, job?.status === "running");
 
+  // Close the mobile drawer whenever the route changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the route is the trigger
+  useEffect(() => setDrawerOpen(false), [path]);
+
   // Messages from the Google sign-in redirect.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.has("signedIn")) setBanner({ tone: "good", text: "YouTube is connected." });
+    if (params.has("signedIn")) notify("good", "YouTube is connected.");
     const authError = params.get("authError");
-    if (authError) setBanner({ tone: "error", text: authError });
+    if (authError) notify("error", authError);
     if (params.size > 0) window.history.replaceState(null, "", window.location.pathname);
-  }, []);
+  }, [notify]);
 
   const startJob = useCallback(async (jobPath: string, body: unknown = {}) => {
     const started = await api<JobView>(jobPath, { method: "POST", body });
@@ -87,10 +120,13 @@ export function App() {
     runs: runs.data ?? [],
     job,
     version,
+    theme,
+    setTheme,
     navigate,
     refresh,
     startJob,
     openSignIn: () => setSignInOpen(true),
+    notify,
   };
 
   const playlistMatch = /^\/playlists\/([\w-]+)$/.exec(path);
@@ -99,39 +135,45 @@ export function App() {
   return (
     <AppContext.Provider value={state}>
       <div className="app">
-        <TopBar />
+        <TopBar drawerOpen={drawerOpen} onToggleDrawer={() => setDrawerOpen((v) => !v)} />
         <div className="layout">
-          <Sidebar path={path} />
-          <main className="main">
-            {banner && (
-              <div className="banner-slot">
-                <Notice tone={banner.tone}>
-                  {banner.text}{" "}
-                  <button type="button" className="link" onClick={() => setBanner(null)}>
-                    Dismiss
-                  </button>
+          <Sidebar path={path} open={drawerOpen} />
+          {drawerOpen && (
+            <button
+              type="button"
+              className="scrim"
+              aria-label="Close the menu"
+              onClick={() => setDrawerOpen(false)}
+            />
+          )}
+          <main className="main" id="main">
+            {status.error ? (
+              <div className="page page-narrow">
+                <Notice tone="error">
+                  <strong>Cannot reach the Sortify server.</strong>
+                  <div>{status.error}</div>
+                  <div>
+                    Start it with <code>sortify ui</code>, then reload this page.
+                  </div>
                 </Notice>
               </div>
-            )}
-            {status.error && (
-              <Notice tone="error">Cannot reach the Sortify server: {status.error}</Notice>
-            )}
-            {playlistMatch?.[1] ? (
+            ) : playlistMatch?.[1] ? (
               <PlaylistPage key={playlistMatch[1]} playlistId={playlistMatch[1]} />
             ) : runMatch?.[1] ? (
               <RunPage key={runMatch[1]} runId={Number(runMatch[1])} />
             ) : (
-              <Welcome />
+              <Home />
             )}
           </main>
         </div>
         <JobBar />
+        <Toasts toasts={toasts} onDismiss={dismiss} />
         {signInOpen && (
           <SignInDialog
             onClose={() => setSignInOpen(false)}
             onSignedIn={() => {
               setSignInOpen(false);
-              setBanner({ tone: "good", text: "YouTube is connected." });
+              notify("good", "YouTube is connected.");
               refresh();
             }}
           />

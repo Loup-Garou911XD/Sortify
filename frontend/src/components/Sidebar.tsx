@@ -1,11 +1,12 @@
 import { type FormEvent, useState } from "react";
 import { useApp } from "../App.tsx";
 import { fmt, pct } from "../hooks.ts";
+import { IconPlus } from "./icons.tsx";
 import { Button, Progress, StatusPill } from "./ui.tsx";
 
 const DIMENSION_LABEL = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
-export function Sidebar({ path }: { path: string }) {
+export function Sidebar({ path, open }: { path: string; open: boolean }) {
   const { playlists, runs, status, job, startJob, navigate, openSignIn } = useApp();
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string>();
@@ -27,10 +28,29 @@ export function Sidebar({ path }: { path: string }) {
     }
   };
 
+  const link = (href: string, title: string, meta: React.ReactNode) => (
+    <a
+      href={href}
+      className={path === href ? "nav-item active" : "nav-item"}
+      aria-current={path === href ? "page" : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        navigate(href);
+      }}
+    >
+      <span className="nav-title">{title}</span>
+      {meta}
+    </a>
+  );
+
   return (
-    <nav className="sidebar" aria-label="Playlists and plans">
+    <nav
+      className={open ? "sidebar open" : "sidebar"}
+      aria-label="Playlists and plans"
+      id="sidebar"
+    >
       <form className="add-form" onSubmit={add}>
-        <label htmlFor="add-url" className="section-title">
+        <label htmlFor="add-url" className="eyebrow">
           Add a playlist
         </label>
         <div className="add-row">
@@ -38,7 +58,7 @@ export function Sidebar({ path }: { path: string }) {
             id="add-url"
             type="text"
             inputMode="url"
-            placeholder="Playlist link"
+            placeholder="Paste a playlist link"
             title="A youtube.com or music.youtube.com playlist link"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -47,10 +67,12 @@ export function Sidebar({ path }: { path: string }) {
           <Button
             type="submit"
             variant="primary"
+            className="btn-icon"
+            aria-label="Add playlist"
             busy={adding}
             disabled={!status?.signedIn || busy || !url.trim()}
           >
-            Add
+            {!adding && <IconPlus />}
           </Button>
         </div>
         {!status?.signedIn && (
@@ -69,67 +91,60 @@ export function Sidebar({ path }: { path: string }) {
         )}
       </form>
 
-      <div className="section-title">Playlists</div>
-      {playlists.length === 0 ? (
-        <p className="hint">Nothing here yet.</p>
-      ) : (
-        <ul className="nav-list">
-          {playlists.map((p) => {
-            const href = `/playlists/${p.playlistId}`;
-            const tagged = Math.max(p.withSubgenre, p.withMood);
-            return (
-              <li key={p.playlistId}>
-                <a
-                  href={href}
-                  className={path === href ? "nav-item active" : "nav-item"}
-                  aria-current={path === href ? "page" : undefined}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(href);
-                  }}
-                >
-                  <span className="nav-title">{p.title}</span>
-                  <span className="nav-meta">
-                    {fmt(p.total)} tracks · {pct(tagged, p.total)}% tagged
-                  </span>
-                  <Progress value={tagged} max={p.total} tone="muted" label="Tagged" />
-                </a>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {runs.length > 0 && (
-        <>
-          <div className="section-title">Saved plans</div>
+      <section className="rail-section">
+        <div className="rail-head">
+          <span className="eyebrow">Playlists</span>
+          {playlists.length > 0 && <span className="rail-count">{playlists.length}</span>}
+        </div>
+        {playlists.length === 0 ? (
+          <p className="rail-empty">None yet. Paste a link above.</p>
+        ) : (
           <ul className="nav-list">
-            {runs.map((r) => {
-              const href = `/runs/${r.runId}`;
+            {playlists.map((p) => {
+              const tagged = Math.max(p.withSubgenre, p.withMood);
               return (
-                <li key={r.runId}>
-                  <a
-                    href={href}
-                    className={path === href ? "nav-item active" : "nav-item"}
-                    aria-current={path === href ? "page" : undefined}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      navigate(href);
-                    }}
-                  >
-                    <span className="nav-title">{r.sourceTitle}</span>
-                    <span className="nav-meta nav-meta-row">
-                      <span>
-                        {r.groupCount} playlists by {DIMENSION_LABEL[r.dimension]}
+                <li key={p.playlistId}>
+                  {link(
+                    `/playlists/${p.playlistId}`,
+                    p.title,
+                    <>
+                      <span className="nav-meta">
+                        {fmt(p.total)} tracks <span className="sep">·</span> {pct(tagged, p.total)}%
+                        tagged
                       </span>
-                      <StatusPill status={r.status} />
-                    </span>
-                  </a>
+                      <Progress value={tagged} max={p.total} tone="muted" label="Tagged" />
+                    </>,
+                  )}
                 </li>
               );
             })}
           </ul>
-        </>
+        )}
+      </section>
+
+      {runs.length > 0 && (
+        <section className="rail-section">
+          <div className="rail-head">
+            <span className="eyebrow">Plans</span>
+            <span className="rail-count">{runs.length}</span>
+          </div>
+          <ul className="nav-list">
+            {runs.map((r) => (
+              <li key={r.runId}>
+                {link(
+                  `/runs/${r.runId}`,
+                  r.sourceTitle,
+                  <span className="nav-meta nav-meta-row">
+                    <span className="ellipsis">
+                      {r.groupCount} by {DIMENSION_LABEL[r.dimension]}
+                    </span>
+                    <StatusPill status={r.status} />
+                  </span>,
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </nav>
   );

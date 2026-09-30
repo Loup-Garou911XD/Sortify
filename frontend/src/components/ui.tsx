@@ -1,6 +1,21 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import {
+  type ButtonHTMLAttributes,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { Dimension, TrackTagView } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
+import {
+  IconAlert,
+  IconCheck,
+  IconCheckCircle,
+  IconChevronDown,
+  IconInbox,
+  IconInfo,
+} from "./icons.tsx";
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
@@ -14,7 +29,7 @@ export function Button({
   return (
     <button
       type="button"
-      className={`btn btn-${variant} ${className}`}
+      className={`btn btn-${variant} ${className}`.trim()}
       disabled={busy || rest.disabled}
       {...rest}
     >
@@ -38,14 +53,52 @@ export function Progress({
   const width = max === 0 ? 0 : Math.min(100, (100 * value) / max);
   return (
     <div
-      className={`progress progress-${tone}`}
+      className={`meter meter-${tone}`}
       role="progressbar"
       aria-valuemin={0}
       aria-valuemax={max}
       aria-valuenow={value}
       aria-label={label}
     >
-      <div className="progress-fill" style={{ width: `${width}%` }} />
+      <div className="meter-fill" style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
+export function Skeleton({ height = 16, width = "100%" }: { height?: number; width?: string }) {
+  return <div className="skeleton" style={{ height, width }} aria-hidden />;
+}
+
+/** Placeholder with the shape of a page, so a slow load does not collapse the layout. */
+export function PageSkeleton({ label }: { label: string }) {
+  return (
+    <div className="skeleton-stack" role="status" aria-label={label}>
+      <Skeleton height={26} width="42%" />
+      <Skeleton height={14} width="28%" />
+      <div style={{ height: 10 }} />
+      <Skeleton height={78} />
+      <Skeleton height={340} />
+    </div>
+  );
+}
+
+export function EmptyState({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="empty-state">
+      <IconInbox />
+      <p>
+        <strong>{title}</strong>
+      </p>
+      {children && <p className="muted">{children}</p>}
+      {action && <div className="step-action">{action}</div>}
     </div>
   );
 }
@@ -73,7 +126,7 @@ export function TagChips({ tags, dimension }: { tags: TrackTagView[]; dimension:
     seen.add(t.value);
     return true;
   });
-  if (unique.length === 0) return <span className="muted">—</span>;
+  if (unique.length === 0) return <span className="faint">—</span>;
   return (
     <span className="chips">
       {unique.map((t) => (
@@ -115,12 +168,24 @@ export function Segmented<T extends string>({
 export function StatusPill({ status }: { status: string }) {
   const label: Record<string, string> = {
     planned: "Not started",
-    applying: "In progress",
+    applying: "Creating",
     paused: "Paused",
     done: "Done",
   };
-  return <span className={`pill pill-${status}`}>{label[status] ?? status}</span>;
+  return (
+    <span className={`pill pill-${status}`}>
+      <span className="dot" aria-hidden />
+      {label[status] ?? status}
+    </span>
+  );
 }
+
+const NOTICE_ICON = {
+  info: IconInfo,
+  warn: IconAlert,
+  error: IconAlert,
+  good: IconCheckCircle,
+} as const;
 
 export function Notice({
   tone = "info",
@@ -129,9 +194,11 @@ export function Notice({
   tone?: "info" | "warn" | "error" | "good";
   children: ReactNode;
 }) {
+  const Glyph = NOTICE_ICON[tone];
   return (
     <div className={`notice notice-${tone}`} role={tone === "error" ? "alert" : undefined}>
-      {children}
+      <Glyph />
+      <div className="notice-body">{children}</div>
     </div>
   );
 }
@@ -139,9 +206,116 @@ export function Notice({
 export function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
     <div className="stat">
-      <div className="stat-label">{label}</div>
+      <span className="eyebrow">{label}</span>
       <div className="stat-value">{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
+      {sub}
     </div>
+  );
+}
+
+/** A labelled form control: the label sits above the input as a small caps eyebrow. */
+export function Field({
+  label,
+  help,
+  children,
+}: {
+  label: string;
+  help?: string;
+  children: ReactNode;
+}) {
+  return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: the control is the caller's child
+    <label className="control">
+      <span className="eyebrow">{label}</span>
+      {children}
+      {help && <span className="control-help">{help}</span>}
+    </label>
+  );
+}
+
+/**
+ * A popover menu. Closes on Escape, on an outside click, and whenever the caller calls `close`
+ * from the render prop.
+ */
+export function Menu({
+  trigger,
+  children,
+  label,
+  wide = false,
+}: {
+  trigger: ReactNode;
+  children: (close: () => void) => ReactNode;
+  label: string;
+  wide?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const id = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="menu-wrap" ref={wrap}>
+      <button
+        type="button"
+        className="menu-trigger"
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-controls={open ? id : undefined}
+        aria-label={label}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {trigger}
+        <IconChevronDown className="chev" />
+      </button>
+      {open && (
+        <div className={wide ? "menu-pop wide" : "menu-pop"} id={id}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A plain action, or one choice of a set when `selected` is given. */
+export function MenuItem({
+  children,
+  onClick,
+  selected,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  selected?: boolean;
+}) {
+  if (selected === undefined) {
+    return (
+      <button type="button" className="menu-item" onClick={onClick}>
+        {children}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      className="menu-item"
+      onClick={onClick}
+    >
+      {children}
+      {selected && <IconCheck className="tick" size={14} />}
+    </button>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt } from "../hooks.ts";
+import { IconAlert, IconCheckCircle, IconStop } from "./icons.tsx";
 import { Button, Progress } from "./ui.tsx";
 
 const TITLE = {
@@ -32,7 +33,14 @@ export function JobBar() {
     >
       <div className="jobbar-main">
         <div className="jobbar-text">
-          <strong>{running ? job.label : `${TITLE[job.status]}: ${job.label}`}</strong>
+          <strong>
+            {running && <span className="spinner" aria-hidden />}
+            {job.status === "done" && <IconCheckCircle size={14} />}
+            {(job.status === "failed" || job.status === "cancelled") && <IconAlert size={14} />}
+            <span className="ellipsis">
+              {running ? job.label : `${TITLE[job.status]} — ${job.label}`}
+            </span>
+          </strong>
           <span className="muted ellipsis">
             {running
               ? job.progress
@@ -65,6 +73,7 @@ export function JobBar() {
                 await api("/api/job/cancel", { method: "POST" }).catch(() => setStopping(false));
               }}
             >
+              {!stopping && <IconStop />}
               {stopping ? "Stopping…" : "Stop"}
             </Button>
           )

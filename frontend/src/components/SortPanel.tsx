@@ -8,7 +8,8 @@ import type {
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, pct, plural, quotaFor, useDebounced } from "../hooks.ts";
-import { Button, Notice, Progress, Segmented } from "./ui.tsx";
+import { IconClose } from "./icons.tsx";
+import { Button, EmptyState, Field, Notice, Progress, Segmented } from "./ui.tsx";
 
 interface Draft {
   key: string;
@@ -26,6 +27,8 @@ const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "mood", label: "Mood" },
   { value: "type", label: "Song type" },
 ];
+
+const DIMENSION_NOUN = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: TrackView[] }) {
   const { status, version, navigate, refresh, runs } = useApp();
@@ -101,6 +104,8 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   const noneTagged = untagged === tracks.length;
   const additions = included.reduce((sum, d) => sum + d.videoIds.length, 0);
   const quota = quotaFor(included.length, additions, status?.dailyQuota ?? 10_000);
+  // Every card's bar is drawn against the biggest bin, so the grid reads as a histogram.
+  const largest = Math.max(1, ...drafts.map((d) => d.videoIds.length));
   const nameCounts = new Map<string, number>();
   for (const d of included) {
     const k = d.name.trim().toLowerCase();
@@ -143,7 +148,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
     <div className="sort">
       <section className="controls" aria-label="Sort settings">
         <div className="control">
-          <span className="control-label" aria-hidden>
+          <span className="eyebrow" aria-hidden>
             Group by
           </span>
           <Segmented
@@ -153,8 +158,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
             options={DIMENSIONS}
           />
         </div>
-        <label className="control">
-          <span className="control-label">Smallest playlist</span>
+        <Field label="Smallest playlist">
           <span className="number-field">
             <input
               type="number"
@@ -163,69 +167,78 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
               value={minSize}
               onChange={(e) => setMinSize(Math.max(1, Number(e.target.value) || 1))}
             />
-            <span className="muted">tracks</span>
+            <span className="muted small">tracks</span>
           </span>
-        </label>
-        <label className="control">
-          <span className="control-label">Playlists per track</span>
+        </Field>
+        <Field label="Playlists per track">
           <select value={maxGroups} onChange={(e) => setMaxGroups(Number(e.target.value))}>
             <option value={0}>Every match</option>
             <option value={1}>Best match only</option>
             <option value={2}>Up to 2</option>
             <option value={3}>Up to 3</option>
           </select>
-        </label>
-        <label className="control control-toggle">
+        </Field>
+        <label className="control-toggle">
           <input
             type="checkbox"
             checked={leftovers}
             onChange={(e) => setLeftovers(e.target.checked)}
           />
-          <span>
+          <span className="small">
             Other &amp; Unsorted playlists
             <span className="control-help">for tracks that fit no group</span>
           </span>
         </label>
       </section>
       {edited && (
-        <p className="hint">
-          Changing these settings rebuilds the preview and discards your edits.
-        </p>
+        <p className="hint">Changing a setting rebuilds the preview and discards your edits.</p>
       )}
 
-      {error && <Notice tone="error">{error}</Notice>}
+      {error && (
+        <div style={{ marginTop: 14 }}>
+          <Notice tone="error">{error}</Notice>
+        </div>
+      )}
 
       {untagged > 0 && (
-        <Notice tone="warn">
-          {noneTagged
-            ? `None of these ${fmt(tracks.length)} tracks are tagged yet, so they would all land in Unsorted.`
-            : `${plural(untagged, "track")} ${untagged === 1 ? "isn't" : "aren't"} tagged yet and will land in Unsorted.`}{" "}
-          Use <strong>Tag {plural(untagged, "track")}</strong> at the top of the page first.
-        </Notice>
+        <div style={{ marginTop: 14 }}>
+          <Notice tone="warn">
+            {noneTagged
+              ? `None of these ${fmt(tracks.length)} tracks are tagged yet, so they would all land in Unsorted.`
+              : `${plural(untagged, "track")} ${untagged === 1 ? "isn't" : "aren't"} tagged yet and will land in Unsorted.`}{" "}
+            Tag them from the top of this page first.
+          </Notice>
+        </div>
       )}
 
       {preview && (
         <>
           <div className="summary" aria-live="polite">
             <div className="summary-figures">
-              <div>
+              <div className="summary-figure">
                 <strong>{plural(included.length, "playlist")}</strong>
-                <span className="muted"> · {plural(additions, "track addition")}</span>
+                <span className="muted small">{plural(additions, "track addition")}</span>
               </div>
-              <div className="muted">
-                {fmt(quota.units)} quota units ·{" "}
-                {quota.days <= 1 ? (
-                  "fits in one day"
-                ) : (
-                  <span className="warn-text">about {quota.days} days at the daily limit</span>
-                )}
-              </div>
-              <div className="summary-coverage">
-                <span className="muted">
-                  {pct(preview.tagged, preview.total)}% of tracks have a{" "}
-                  {basis?.dimension === "type" ? "song type" : (basis?.dimension ?? dimension)}
+              <div className="summary-figure">
+                <strong>{fmt(quota.units)}</strong>
+                <span className="muted small">
+                  {quota.days <= 1 ? (
+                    "quota units, fits in one day"
+                  ) : (
+                    <span className="warn-text">
+                      quota units, about {quota.days} days at the daily limit
+                    </span>
+                  )}
                 </span>
-                <Progress value={preview.tagged} max={preview.total} label="Coverage" />
+              </div>
+              <div className="summary-figure">
+                <div className="summary-coverage">
+                  <strong>{pct(preview.tagged, preview.total)}%</strong>
+                  <Progress value={preview.tagged} max={preview.total} label="Coverage" />
+                </div>
+                <span className="muted small">
+                  of tracks have a {DIMENSION_NOUN[basis?.dimension ?? dimension]}
+                </span>
               </div>
             </div>
             <Button
@@ -244,7 +257,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
             </Notice>
           )}
           {openPlans.length > 0 && (
-            <p className="hint">
+            <p className="hint" style={{ margin: "0 0 12px" }}>
               This playlist already has {plural(openPlans.length, "unfinished plan")}:{" "}
               {openPlans.map((r, i) => (
                 <span key={r.runId}>
@@ -256,7 +269,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                       navigate(`/runs/${r.runId}`);
                     }}
                   >
-                    by {r.dimension}
+                    by {DIMENSION_NOUN[r.dimension]}
                   </a>
                 </span>
               ))}
@@ -265,20 +278,17 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
           )}
 
           {drafts.length === 0 ? (
-            <div className="empty-state">
-              <p>No groups yet.</p>
-              <p className="muted">Tag the tracks first, or lower the smallest playlist size.</p>
-            </div>
+            <EmptyState title="No groups to create">
+              Tag the tracks first, or lower the smallest playlist size.
+            </EmptyState>
           ) : (
             <div className="groups">
               {drafts.map((d) => {
                 const open = expanded.has(d.key);
                 const shown = open ? d.videoIds : d.videoIds.slice(0, PREVIEW_ROWS);
-                const cls = [
-                  "group",
-                  d.included ? "" : "excluded",
-                  d.leftover ? "leftover" : "",
-                ].join(" ");
+                const cls = ["group", d.included ? "" : "excluded", d.leftover ? "leftover" : ""]
+                  .filter(Boolean)
+                  .join(" ");
                 return (
                   <article key={d.key} className={cls}>
                     <header className="group-head">
@@ -297,10 +307,17 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                         aria-label="Playlist name"
                         onChange={(e) => update(d.key, (x) => ({ ...x, name: e.target.value }))}
                       />
-                      <span className="count" title="Tracks">
+                      <span className="group-count" title="Tracks">
                         {fmt(d.videoIds.length)}
                       </span>
                     </header>
+                    <div
+                      className="group-share"
+                      aria-hidden
+                      title={`${fmt(d.videoIds.length)} of ${fmt(largest)} in the biggest group`}
+                    >
+                      <span style={{ width: `${(100 * d.videoIds.length) / largest}%` }} />
+                    </div>
                     {d.leftover && (
                       <p className="group-note">
                         {d.name === "Unsorted"
@@ -316,7 +333,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                           </span>
                           <button
                             type="button"
-                            className="icon-btn"
+                            className="row-btn"
                             aria-label={`Remove ${label(id)} from ${d.name}`}
                             title="Remove from this playlist"
                             onClick={() =>
@@ -326,7 +343,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                               }))
                             }
                           >
-                            ×
+                            <IconClose size={13} />
                           </button>
                         </li>
                       ))}

@@ -52,7 +52,8 @@ export function useLocation(): [string, (to: string) => void] {
     if (to === window.location.pathname) return;
     window.history.pushState(null, "", to);
     setPath(to);
-    window.scrollTo(0, 0);
+    // The main column is the scroll container, not the window.
+    document.getElementById("main")?.scrollTo(0, 0);
   }, []);
   return [path, navigate];
 }
@@ -64,6 +65,39 @@ export function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(id);
   }, [value, ms]);
   return debounced;
+}
+
+export type Theme = "light" | "dark" | "system";
+const THEME_KEY = "sortify-theme";
+
+const readTheme = (): Theme => {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    return stored === "light" || stored === "dark" ? stored : "system";
+  } catch {
+    return "system";
+  }
+};
+
+/**
+ * Light, dark, or whatever the system says. "system" removes the attribute so the stylesheet's
+ * `light-dark()` tokens follow `prefers-color-scheme` again.
+ */
+export function useTheme(): [Theme, (next: Theme) => void] {
+  const [theme, setTheme] = useState<Theme>(readTheme);
+
+  useEffect(() => {
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    try {
+      if (theme === "system") localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      // Private browsing: the choice just does not survive a reload.
+    }
+  }, [theme]);
+
+  return [theme, setTheme];
 }
 
 /** Runs `fn` every `ms` while `active`; the latest `fn` is always used. */

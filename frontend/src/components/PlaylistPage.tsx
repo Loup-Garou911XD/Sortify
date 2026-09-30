@@ -2,9 +2,10 @@ import { useState } from "react";
 import type { PlaylistDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
+import { IconExternal, IconRefresh, IconTag } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
-import { Button, Notice, Progress, Stat } from "./ui.tsx";
+import { Button, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
 
 type Tab = "sort" | "tracks";
 
@@ -16,8 +17,13 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const busy = job?.status === "running";
   const running = busy && job?.playlistId === playlistId ? job : null;
 
-  if (detail.error) return <Notice tone="error">{detail.error}</Notice>;
-  if (!detail.data) return <div className="page loading">Loading…</div>;
+  if (detail.error)
+    return (
+      <div className="page page-narrow">
+        <Notice tone="error">{detail.error}</Notice>
+      </div>
+    );
+  if (!detail.data) return <PageSkeleton label="Loading the playlist" />;
 
   const { playlist, tracks } = detail.data;
   const untagged = playlist.total - playlist.enriched;
@@ -35,16 +41,21 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   return (
     <div className="page">
       <header className="page-header">
-        <div>
+        <div className="page-heading">
           <h1>{playlist.title}</h1>
           <p className="meta">
-            {plural(playlist.total, "track")} · read from YouTube {timeAgo(playlist.fetchedAt)} ·{" "}
+            <span>{plural(playlist.total, "track")}</span>
+            <span className="sep">·</span>
+            <span>read {timeAgo(playlist.fetchedAt)}</span>
+            <span className="sep">·</span>
             <a
+              className="ext-link"
               href={`https://music.youtube.com/playlist?list=${playlist.playlistId}`}
               target="_blank"
               rel="noreferrer"
             >
-              Open on YouTube Music
+              YouTube Music
+              <IconExternal />
             </a>
           </p>
         </div>
@@ -52,10 +63,15 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           <Button
             variant="ghost"
             disabled={busy || !status?.signedIn}
-            title={status?.signedIn ? "Read the playlist again to pick up new tracks" : undefined}
+            title={
+              status?.signedIn
+                ? "Read the playlist again to pick up new tracks"
+                : "Connect YouTube first"
+            }
             onClick={() => run("/api/playlists", { url: playlist.playlistId })}
           >
-            Refresh from YouTube
+            <IconRefresh />
+            Refresh
           </Button>
           <Button
             disabled={busy || playlist.enriched === 0}
@@ -69,6 +85,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
             disabled={busy || untagged === 0}
             onClick={() => run(`/api/playlists/${playlistId}/enrich`)}
           >
+            <IconTag />
             {untagged === 0 ? "All tracks tagged" : `Tag ${plural(untagged, "track")}`}
           </Button>
         </div>
@@ -77,18 +94,18 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
       {error && <Notice tone="error">{error}</Notice>}
       {running?.kind === "enrich" && (
         <Notice tone="info">
-          Tagging tracks…{" "}
-          {running.progress && `${fmt(running.progress.done)} of ${fmt(running.progress.total)}`}.
-          You can keep working; the page updates when it finishes.
+          Tagging tracks
+          {running.progress && ` — ${fmt(running.progress.done)} of ${fmt(running.progress.total)}`}
+          . You can keep working; this page updates when it finishes.
         </Notice>
       )}
       {missingSources.length > 0 && untagged > 0 && (
         <Notice tone="warn">
-          Not configured, so tracks will miss their tags:
+          <strong>Some tag sources are off,</strong> so tracks will miss their tags:
           <ul className="notice-list">
             {missingSources.map((s) => (
               <li key={s.id}>
-                <strong>{s.label}</strong>: {s.help} Set{" "}
+                <strong>{s.label}</strong> — {s.help} Set{" "}
                 {s.envVars.map((v, i) => (
                   <span key={v}>
                     {i > 0 && " and "}
@@ -99,7 +116,9 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
               </li>
             ))}
           </ul>
-          Then restart <code>sortify ui</code>.
+          <div style={{ marginTop: 7 }}>
+            Then restart <code>sortify ui</code>.
+          </div>
         </Notice>
       )}
 
@@ -107,17 +126,34 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
         <Stat
           label="Tagged"
           value={`${pct(playlist.enriched, playlist.total)}%`}
-          sub={<Progress value={playlist.enriched} max={playlist.total} label="Tagged" />}
+          sub={
+            <>
+              <Progress value={playlist.enriched} max={playlist.total} label="Tagged" />
+              <span className="stat-sub">
+                {fmt(playlist.enriched)} of {fmt(playlist.total)} tracks
+              </span>
+            </>
+          }
         />
         <Stat
           label="Have a subgenre"
           value={`${pct(playlist.withSubgenre, playlist.total)}%`}
-          sub={<Progress value={playlist.withSubgenre} max={playlist.total} label="Subgenre" />}
+          sub={
+            <>
+              <Progress value={playlist.withSubgenre} max={playlist.total} label="Subgenre" />
+              <span className="stat-sub">{fmt(playlist.withSubgenre)} tracks</span>
+            </>
+          }
         />
         <Stat
           label="Have a mood"
           value={`${pct(playlist.withMood, playlist.total)}%`}
-          sub={<Progress value={playlist.withMood} max={playlist.total} label="Mood" />}
+          sub={
+            <>
+              <Progress value={playlist.withMood} max={playlist.total} label="Mood" />
+              <span className="stat-sub">{fmt(playlist.withMood)} tracks</span>
+            </>
+          }
         />
       </section>
 

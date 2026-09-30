@@ -62,68 +62,86 @@ export function SignInDialog({
 
   return (
     <dialog ref={dialog} className="dialog" onClose={onClose} aria-labelledby="signin-title">
-      <h2 id="signin-title">Connect YouTube</h2>
+      <div className="dialog-head">
+        <h2 id="signin-title">Connect YouTube</h2>
+      </div>
 
       {!status?.hasClientSecrets ? (
         <>
-          <p>Sortify needs an OAuth client from Google Cloud before you can sign in.</p>
-          {status?.clientSecretsError && (
-            <Notice tone="warn">The server says: {status.clientSecretsError}</Notice>
-          )}
-          <ol className="steps">
-            <li>
-              In Google Cloud Console, enable <strong>YouTube Data API v3</strong>.
-            </li>
-            <li>Create an OAuth client ID of type Desktop app and download its JSON file.</li>
-            <li>
-              Set <code>SORTIFY_CLIENT_SECRETS</code> to the contents of that file, or to its path.
-              In a Codespace, add it as a Codespaces secret and restart the codespace; secrets only
-              reach a codespace when it starts.
-            </li>
-            <li>
-              Restart the backend (<code>sortify ui</code>) from a terminal where the variable is
-              set.
-            </li>
-          </ol>
+          <div className="dialog-body">
+            <p>Sortify needs an OAuth client from Google Cloud before you can sign in.</p>
+            {status?.clientSecretsError && (
+              <Notice tone="warn">The server says: {status.clientSecretsError}</Notice>
+            )}
+            <ol className="steps">
+              <li>
+                <span>
+                  In Google Cloud Console, enable <strong>YouTube Data API v3</strong>.
+                </span>
+              </li>
+              <li>
+                <span>
+                  Create an OAuth client ID of type Desktop app and download its JSON file.
+                </span>
+              </li>
+              <li>
+                <span>
+                  Set <code>SORTIFY_CLIENT_SECRETS</code> to the contents of that file, or to its
+                  path. In a Codespace, add it as a Codespaces secret and restart the codespace;
+                  secrets only reach a codespace when it starts.
+                </span>
+              </li>
+              <li>
+                <span>
+                  Restart the backend (<code>sortify ui</code>) from a terminal where the variable
+                  is set.
+                </span>
+              </li>
+            </ol>
+          </div>
           <div className="dialog-actions">
             <Button onClick={onClose}>Close</Button>
           </div>
         </>
       ) : (
         <>
-          <p>
-            Sortify asks for permission to read your playlists and create new ones. It never changes
-            or deletes existing playlists.
-          </p>
-          <ol className="steps">
-            <li>
-              <Button variant="primary" busy={busy && !opened} onClick={open}>
-                Open Google sign-in
-              </Button>
-            </li>
-            <li>
-              Approve access. This page updates by itself when Google sends you back.
-              <form className="paste-form" onSubmit={complete}>
-                <label htmlFor="paste-url">
-                  If the page after approving doesn't load, copy its address and paste it here:
-                </label>
-                <div className="add-row">
-                  <input
-                    id="paste-url"
-                    type="text"
-                    placeholder="http://127.0.0.1:4747/?state=…&code=…"
-                    value={pasted}
-                    onChange={(e) => setPasted(e.target.value)}
-                    disabled={!opened}
-                  />
-                  <Button type="submit" busy={busy && opened} disabled={!pasted.trim()}>
-                    Finish
-                  </Button>
+          <div className="dialog-body">
+            <p>
+              Sortify asks for permission to read your playlists and create new ones. It never
+              changes or deletes existing playlists.
+            </p>
+            <ol className="steps">
+              <li>
+                <Button variant="primary" busy={busy && !opened} onClick={open}>
+                  Open Google sign-in
+                </Button>
+              </li>
+              <li>
+                <div>
+                  Approve access. This page updates by itself when Google sends you back.
+                  <form className="paste-form" onSubmit={complete}>
+                    <label htmlFor="paste-url">
+                      If the page after approving doesn't load, copy its address and paste it here:
+                    </label>
+                    <div className="add-row">
+                      <input
+                        id="paste-url"
+                        type="text"
+                        placeholder="http://127.0.0.1:4747/?state=…&code=…"
+                        value={pasted}
+                        onChange={(e) => setPasted(e.target.value)}
+                        disabled={!opened}
+                      />
+                      <Button type="submit" busy={busy && opened} disabled={!pasted.trim()}>
+                        Finish
+                      </Button>
+                    </div>
+                  </form>
                 </div>
-              </form>
-            </li>
-          </ol>
-          {error && <Notice tone="error">{error}</Notice>}
+              </li>
+            </ol>
+            {error && <Notice tone="error">{error}</Notice>}
+          </div>
           <div className="dialog-actions">
             <Button variant="ghost" onClick={onClose}>
               Cancel

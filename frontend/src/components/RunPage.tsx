@@ -3,12 +3,13 @@ import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
-import { Button, Notice, Progress, StatusPill } from "./ui.tsx";
+import { IconArrowLeft, IconExternal, IconPlay, IconTrash } from "./icons.tsx";
+import { Button, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
 const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function RunPage({ runId }: { runId: number }) {
-  const { version, job, status, startJob, navigate, refresh, openSignIn } = useApp();
+  const { version, job, status, startJob, navigate, refresh, openSignIn, notify } = useApp();
   const detail = useResource<RunDetail>(`/api/runs/${runId}`, version);
   const [privacy, setPrivacy] = useState<Privacy>("private");
   const [maxWrites, setMaxWrites] = useState("");
@@ -16,8 +17,13 @@ export function RunPage({ runId }: { runId: number }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string>();
 
-  if (detail.error) return <Notice tone="error">{detail.error}</Notice>;
-  if (!detail.data) return <div className="page loading">Loading…</div>;
+  if (detail.error)
+    return (
+      <div className="page page-narrow">
+        <Notice tone="error">{detail.error}</Notice>
+      </div>
+    );
+  if (!detail.data) return <PageSkeleton label="Loading the plan" />;
 
   const { run, groups } = detail.data;
   const busy = job?.status === "running";
@@ -25,6 +31,7 @@ export function RunPage({ runId }: { runId: number }) {
   const written = applyingThis?.progress?.done ?? run.written;
   const total = applyingThis?.progress?.total ?? run.total;
   const toCreate = groups.filter((g) => g.targetPlaylistId === null).length;
+  const created = groups.length - toCreate;
   const pending = run.total - run.written;
   const quota = quotaFor(toCreate, pending, status?.dailyQuota ?? 10_000);
   const neverApplied = groups.every((g) => g.targetPlaylistId === null);
@@ -43,6 +50,7 @@ export function RunPage({ runId }: { runId: number }) {
   const remove = async () => {
     try {
       await api(`/api/runs/${runId}`, { method: "DELETE" });
+      notify("good", "Plan deleted.");
       refresh();
       navigate(`/playlists/${run.sourcePlaylistId}`);
     } catch (e) {
@@ -58,28 +66,30 @@ export function RunPage({ runId }: { runId: number }) {
   return (
     <div className="page">
       <header className="page-header">
-        <div>
-          <p className="eyebrow">
-            <a href={`/playlists/${run.sourcePlaylistId}`} onClick={openSource}>
-              ← {run.sourceTitle}
-            </a>
-          </p>
+        <div className="page-heading">
+          <a className="back-link" href={`/playlists/${run.sourcePlaylistId}`} onClick={openSource}>
+            <IconArrowLeft />
+            {run.sourceTitle}
+          </a>
           <h1>
             {plural(run.groupCount, "playlist")} by {BY[run.dimension]}
           </h1>
           <p className="meta">
-            <StatusPill status={applyingThis ? "applying" : run.status} /> Planned{" "}
-            {timeAgo(run.createdAt)} · {fmt(run.quotaUsed)} quota units used so far
+            <StatusPill status={applyingThis ? "applying" : run.status} />
+            <span className="sep">·</span>
+            <span>planned {timeAgo(run.createdAt)}</span>
+            <span className="sep">·</span>
+            <span>{fmt(run.quotaUsed)} quota units used</span>
           </p>
         </div>
         {!applyingThis && (
           <div className="page-actions">
             {confirmDelete ? (
               <>
-                <span className="muted">
+                <span className="muted small" style={{ maxWidth: "46ch" }}>
                   Delete this plan?
                   {!neverApplied &&
-                    ` Its ${plural(groups.length - toCreate, "playlist")} stay on YouTube${
+                    ` Its ${plural(created, "playlist")} stay on YouTube${
                       run.status === "done" ? "" : ", and the rest can't be resumed"
                     }.`}
                 </span>
@@ -92,6 +102,7 @@ export function RunPage({ runId }: { runId: number }) {
               </>
             ) : (
               <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                <IconTrash />
                 Delete plan
               </Button>
             )}
@@ -101,23 +112,31 @@ export function RunPage({ runId }: { runId: number }) {
 
       {error && <Notice tone="error">{error}</Notice>}
 
-      <section className="panel progress-panel" aria-label="Progress">
-        <div className="progress-head">
-          <strong>
-            {fmt(written)} of {plural(total, "track")} added
-          </strong>
-          <span className="muted">
-            {toCreate > 0
-              ? `${plural(groups.length - toCreate, "playlist")} of ${groups.length} created`
-              : "All playlists created"}
-          </span>
+      <section className="panel run-progress" aria-label="Progress">
+        <div className="run-figures">
+          <div className="run-figure">
+            <strong>
+              {fmt(written)} <span className="muted">/ {fmt(total)}</span>
+            </strong>
+            <span className="eyebrow">Tracks added</span>
+          </div>
+          <div className="run-figure">
+            <strong>
+              {fmt(created)} <span className="muted">/ {fmt(groups.length)}</span>
+            </strong>
+            <span className="eyebrow">Playlists created</span>
+          </div>
         </div>
         <Progress value={written} max={total} tone={run.status === "done" ? "good" : "accent"} />
-        {applyingThis && <p className="muted small">{applyingThis.log.at(-1) ?? "Starting…"}</p>}
+        {applyingThis && (
+          <p className="muted small" style={{ margin: 0 }}>
+            {applyingThis.log.at(-1) ?? "Starting…"}
+          </p>
+        )}
       </section>
 
       {run.status !== "done" && !applyingThis && (
-        <section className="panel apply-panel" aria-label="Create playlists">
+        <section className="panel" aria-label="Create playlists">
           {!status?.signedIn ? (
             <Notice tone="warn">
               <button type="button" className="link" onClick={openSignIn}>
@@ -151,8 +170,7 @@ export function RunPage({ runId }: { runId: number }) {
             </div>
           ) : (
             <div className="apply-row">
-              <label className="control">
-                <span className="control-label">New playlists are</span>
+              <Field label="New playlists are">
                 <select
                   value={privacy}
                   onChange={(e) => setPrivacy(e.target.value as Privacy)}
@@ -162,9 +180,8 @@ export function RunPage({ runId }: { runId: number }) {
                   <option value="unlisted">Unlisted</option>
                   <option value="public">Public</option>
                 </select>
-              </label>
-              <label className="control">
-                <span className="control-label">Stop after (optional)</span>
+              </Field>
+              <Field label="Stop after (optional)">
                 <span className="number-field">
                   <input
                     type="number"
@@ -173,9 +190,9 @@ export function RunPage({ runId }: { runId: number }) {
                     value={maxWrites}
                     onChange={(e) => setMaxWrites(e.target.value)}
                   />
-                  <span className="muted">writes</span>
+                  <span className="muted small">writes</span>
                 </span>
-              </label>
+              </Field>
               <Button
                 variant="primary"
                 disabled={busy}
@@ -190,54 +207,58 @@ export function RunPage({ runId }: { runId: number }) {
       )}
 
       <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Playlist</th>
-              <th className="num">Tracks</th>
-              <th className="progress-col">Added</th>
-              <th>On YouTube</th>
-              <th title="Temporary youtube.com playlists: no quota or sign-in needed, 50 tracks per link">
-                Play without quota
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <tr key={g.groupId}>
-                <td>{g.name}</td>
-                <td className="num">{fmt(g.total)}</td>
-                <td className="progress-col">
-                  <div className="inline-progress">
-                    <Progress
-                      value={g.written}
-                      max={g.total}
-                      tone={g.written === g.total ? "good" : "accent"}
-                      label={`${g.name} added`}
-                    />
-                    <span className="muted small">{fmt(g.written)}</span>
-                  </div>
-                </td>
-                <td>
-                  {g.targetPlaylistId ? (
-                    <a
-                      href={`https://music.youtube.com/playlist?list=${g.targetPlaylistId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open
-                    </a>
-                  ) : (
-                    <span className="muted">Not created yet</span>
-                  )}
-                </td>
-                <td>
-                  <WatchLinks name={g.name} links={g.watchLinks} />
-                </td>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Playlist</th>
+                <th className="num">Tracks</th>
+                <th className="col-progress">Added</th>
+                <th>On YouTube</th>
+                <th title="Temporary youtube.com playlists: no quota or sign-in needed, 50 tracks per link">
+                  Play without quota
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {groups.map((g) => (
+                <tr key={g.groupId}>
+                  <td style={{ fontWeight: 550 }}>{g.name}</td>
+                  <td className="num">{fmt(g.total)}</td>
+                  <td className="col-progress">
+                    <div className="inline-meter">
+                      <Progress
+                        value={g.written}
+                        max={g.total}
+                        tone={g.written === g.total ? "good" : "accent"}
+                        label={`${g.name} added`}
+                      />
+                      <span>{fmt(g.written)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {g.targetPlaylistId ? (
+                      <a
+                        className="ext-link"
+                        href={`https://music.youtube.com/playlist?list=${g.targetPlaylistId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open
+                        <IconExternal />
+                      </a>
+                    ) : (
+                      <span className="faint">Not created yet</span>
+                    )}
+                  </td>
+                  <td>
+                    <WatchLinks name={g.name} links={g.watchLinks} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -245,25 +266,34 @@ export function RunPage({ runId }: { runId: number }) {
 
 /** One link per 50 tracks; YouTube opens each as a temporary playlist. */
 function WatchLinks({ name, links }: { name: string; links: string[] }) {
-  if (links.length === 0) return <span className="muted">No tracks</span>;
+  if (links.length === 0) return <span className="faint">No tracks</span>;
   if (links.length === 1) {
     return (
-      <a href={links[0]} target="_blank" rel="noreferrer">
+      <a className="ext-link" href={links[0]} target="_blank" rel="noreferrer">
+        <IconPlay />
         Play
       </a>
     );
   }
   return (
-    <span className="watch-links">
+    <span className="link-row">
       {links.map((link, i) => (
         <a
           key={link}
+          className={i === 0 ? "ext-link" : undefined}
           href={link}
           target="_blank"
           rel="noreferrer"
           aria-label={`Play ${name}, part ${i + 1} of ${links.length}`}
         >
-          {i === 0 ? "Play 1" : i + 1}
+          {i === 0 ? (
+            <>
+              <IconPlay />
+              Play 1
+            </>
+          ) : (
+            i + 1
+          )}
         </a>
       ))}
     </span>
