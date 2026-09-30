@@ -8,6 +8,7 @@ npm workspaces in one repo:
 
 - `backend/` (package `sortify`): the CLI, the local API server, all domain logic, and the tests. Source is in `backend/src`, tests in `backend/test`.
 - `frontend/` (package `@sortify/frontend`): the React 19 + Vite web UI. It builds to `frontend/dist`, which the backend serves (override with `SORTIFY_UI_DIR`).
+- `web/` (package `@sortify/web`): a second, server-free build of that same UI for GitHub Pages, where users bring their own API keys. It adds files, it does not change `backend/` or `frontend/`. See `web/README.md`.
 - Root: shared tooling (Biome, CI, `.vscode/tasks.json`) and scripts that run both packages.
 
 ## Commands
@@ -19,6 +20,8 @@ npm install                    # installs both workspaces
 npm run dev:backend            # `sortify ui` on :4747, restarts on backend/src changes
 npm run dev:frontend           # Vite on :5173 with hot reload, proxies /api to :4747
                                # (in VS Code, Ctrl+Shift+B starts both in separate terminals)
+npm run dev:web                # the static build on :5173, no backend needed
+npm run build:web              # static site → web/dist (SORTIFY_BASE=/<repo>/ for a project page)
 npm run -s sortify -- <command>   # the CLI from source, e.g. `npm run -s sortify -- ui`
 npm test                       # backend tests (vitest)
 npm test -w backend -- test/planner.test.ts                # one file
@@ -51,6 +54,34 @@ Design constraints worth keeping:
 - YouTube writes cost 50 quota units (≈200/day by default), so the write path must stay resumable and duplicate-free.
 - Personal use first: the Google app stays in testing mode; sharing with other users (app verification) is deferred.
 - External services are injected (`fetch`, `sleep`, `PlaylistWriter`), and tests use fakes and an in-memory `Store(":memory:")`. Tests never make network calls.
+
+## The static build (`web/`)
+
+`web/` ships the frontend to GitHub Pages with no server behind it. It works by building
+`frontend/`'s app and swapping exactly one module: `vite.config.ts` has a `resolveId` plugin that
+redirects anything resolving to `frontend/src/api.ts` to `web/src/api.ts`. That module answers the
+same routes the server does, in the page, by calling the same domain code (`enrichPlaylist`,
+`planGroups`, `applyRun`, `PROVIDERS`). A path alias would not work: the app imports `./api.ts`
+and `../api.ts`, and Vite aliases match the specifier as written.
+
+What differs from the local app, and why:
+- **Storage**: `web/src/store.ts` holds the whole model in memory and flushes dirty collections to
+  IndexedDB, debounced. The `Store` API is synchronous and IndexedDB is not, so this is what keeps
+  the pipeline unchanged. `Store` is a class with private SQLite fields, so `api.ts` has one
+  `as unknown as Store` cast — the only place the web build asserts anything about backend internals.
+- **Keys**: `web/src/settings.ts` keeps them in localStorage and hands them to
+  `createProviderClients` as the same `env` record `process.env` provides.
+- **Auth**: `web/src/auth.ts` is the authorization-code flow with PKCE, exchanged in the browser
+  with the user's own client secret. Every upstream (Google's token endpoint included) sends CORS
+  headers, which is what makes a serverless build possible at all.
+- **Node-only imports**: only `tagging/mapper.ts` has one (`node:fs`, for the YAML override, which
+  this build never reads); it is aliased to `web/src/node-fs-stub.ts`. Everything else that touches
+  `db.ts` does so with `import type`, so `node:sqlite` never reaches the bundle. `enrich/spotify.ts`
+  uses `Buffer` for base64, shimmed in `web/src/shims.ts`. If you add a runtime `node:` import to a
+  module the pipeline reaches, the web build breaks.
+- **Routing**: `useLocation` in `frontend/src/hooks.ts` strips and re-adds `import.meta.env.BASE_URL`
+  so the app can live under `/<repo>/`. With the local build's base of `/` this is a no-op.
+  `web/dist/404.html` is a copy of `index.html`, which is how Pages serves deep links.
 
 ## License
 

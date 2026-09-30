@@ -40,17 +40,26 @@ export function useResource<T>(path: string | null, version = 0): Resource<T> {
   return { data, error, loading, reload };
 }
 
+/**
+ * Where the app is served from: "" for the local server, "/Sortify" for a project page on
+ * GitHub Pages. Routes are written without it, so it is stripped on the way in and added back
+ * on the way out.
+ */
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const appPath = (pathname: string): string =>
+  BASE && pathname.startsWith(BASE) ? pathname.slice(BASE.length) || "/" : pathname;
+
 /** Pathname-based routing without a router dependency. */
 export function useLocation(): [string, (to: string) => void] {
-  const [path, setPath] = useState(() => window.location.pathname);
+  const [path, setPath] = useState(() => appPath(window.location.pathname));
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
+    const onPop = () => setPath(appPath(window.location.pathname));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const navigate = useCallback((to: string) => {
-    if (to === window.location.pathname) return;
-    window.history.pushState(null, "", to);
+    if (to === appPath(window.location.pathname)) return;
+    window.history.pushState(null, "", BASE + to);
     setPath(to);
     // The main column is the scroll container, not the window.
     document.getElementById("main")?.scrollTo(0, 0);

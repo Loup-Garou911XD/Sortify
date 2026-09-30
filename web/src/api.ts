@@ -1,0 +1,452 @@
+/**
+ * The local server, reimplemented in the page.
+ *
+ * `frontend/src/api.ts` sends every call to `sortify ui` over HTTP. On GitHub Pages there is no
+ * server, so Vite swaps this module in for that one: same `api()` signature, same routes, same
+ * JSON shapes, but the work happens here using the very same domain code the server calls
+ * (`enrichPlaylist`, `planGroups`, `applyRun`, the provider registry).
+ */
+import "./shims.ts";
+
+import type {
+  ApplyRequest,
+  CreateRunRequest,
+  Dimension,
+  EnrichRequest,
+  GroupDraft,
+  JobView,
+  PlaylistDetail,
+  PreviewRequest,
+  PreviewResponse,
+  RunDetail,
+  RunSummary,
+  StatusResponse,
+  TrackView,
+} from "../../backend/src/api/types.ts";
+import { applyRun, type Privacy } from "../../backend/src/apply.ts";
+import type { Run, Store } from "../../backend/src/db.ts";
+import { Budget, type LookupDeps } from "../../backend/src/enrich/lookup.ts";
+import { type Enrichers, enrichPlaylist } from "../../backend/src/enrich/pipeline.ts";
+import { createProviderClients, providerStatuses } from "../../backend/src/enrich/providers.ts";
+import { planGroups } from "../../backend/src/planner.ts";
+import { JobRunner } from "../../backend/src/server/jobs.ts";
+import { TagMapper } from "../../backend/src/tagging/mapper.ts";
+import { YouTubeClient } from "../../backend/src/youtube/client.ts";
+import { parsePlaylistId } from "../../backend/src/youtube/playlistUrl.ts";
+import { watchLinks } from "../../backend/src/youtube/watchLinks.ts";
+import { completeAuth, getAccessToken, isSignedIn, signOut, startAuth } from "./auth.ts";
+import { envVars, hasGoogleClient } from "./settings.ts";
+import type { BrowserStore } from "./store.ts";
+
+const VERSION = "0.1.0";
+const DAILY_QUOTA = 10_000;
+const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
+const MAX_GROUPS = 200;
+const MAX_NAME = 150;
+
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/**
+ * The browser store carries every method the pipeline calls, but `Store` is a class with private
+ * SQLite fields, so it cannot be implemented structurally. This is the single cast that bridges
+ * the two, and the only place the web app claims anything about the backend's internals.
+ */
+let store: Store;
+const jobs = new JobRunner();
+/** Set once `boot` has run; every route goes through `ready()` so nothing races the load. */
+let booted = false;
+
+export function boot(browserStore: BrowserStore): void {
+  store = browserStore as unknown as Store;
+  booted = true;
+}
+
+function ready(): Store {
+  if (!booted) throw new ApiError(503, "Still starting up. Try again in a moment.");
+  return store;
+}
+
+function youtube(): YouTubeClient {
+  if (!isSignedIn()) throw new ApiError(401, "Connect YouTube first.");
+  return new YouTubeClient({ getAccessToken });
+}
+
+function enrichers(maxApiCalls?: number): { enrichers: Enrichers; budget: Budget } {
+  const budget = new Budget(maxApiCalls);
+  const deps: LookupDeps = {
+    store: ready(),
+    budget,
+    // Browsers forbid setting User-Agent, so this is ignored by fetch and the browser's own
+    // identity is sent instead. MusicBrainz and Discogs ask for a descriptive one; a static
+    // deploy cannot provide it.
+    userAgent: `Sortify/${VERSION}`,
+  };
+  return {
+    budget,
+    enrichers: { mapper: new TagMapper(), clients: createProviderClients(deps, envVars()) },
+  };
+}
+
+// --- request helpers, mirroring backend/src/server/app.ts ---------------------------
+
+const asObject = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+
+function optionalPositiveInt(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ApiError(400, `${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function dimensionOf(value: unknown): Dimension {
+  if (typeof value !== "string" || !(DIMENSIONS as readonly string[]).includes(value)) {
+    throw new ApiError(400, `dimension must be one of ${DIMENSIONS.join(", ")}`);
+  }
+  return value as Dimension;
+}
+
+/** Known videos only, unique non-empty names, no duplicates inside a group; empties dropped. */
+function validateGroups(raw: unknown, allowed: Set<string>): GroupDraft[] {
+  if (!Array.isArray(raw)) throw new ApiError(400, "groups must be an array");
+  if (raw.length > MAX_GROUPS) throw new ApiError(400, `At most ${MAX_GROUPS} groups`);
+  const names = new Set<string>();
+  const groups: GroupDraft[] = [];
+  for (const item of raw) {
+    const g = asObject(item);
+    const name = typeof g.name === "string" ? g.name.trim() : "";
+    if (!name || name.length > MAX_NAME) {
+      throw new ApiError(400, `Group names must be 1–${MAX_NAME} characters`);
+    }
+    if (names.has(name.toLowerCase())) throw new ApiError(400, `Duplicate group name "${name}"`);
+    names.add(name.toLowerCase());
+    if (!Array.isArray(g.videoIds)) throw new ApiError(400, `Group "${name}" has no videoIds`);
+    const ids: string[] = [];
+    for (const id of g.videoIds) {
+      if (typeof id !== "string" || !allowed.has(id)) {
+        throw new ApiError(400, `Group "${name}" contains a video that is not in the playlist`);
+      }
+      if (!ids.includes(id)) ids.push(id);
+    }
+    if (ids.length > 0) groups.push({ name, videoIds: ids });
+  }
+  if (groups.length === 0) throw new ApiError(400, "The plan has no tracks");
+  return groups;
+}
+
+function requirePlaylist(id: string) {
+  const playlist = ready()
+    .listPlaylists()
+    .find((p) => p.playlistId === id);
+  if (!playlist) throw new ApiError(404, "No such playlist");
+  return playlist;
+}
+
+function requireRun(id: string): Run {
+  const run = ready().getRun(Number(id));
+  if (!run) throw new ApiError(404, "No such plan");
+  return run;
+}
+
+function runSummary(run: Run): RunSummary {
+  const groups = ready().runGroupProgress(run.runId);
+  return {
+    runId: run.runId,
+    sourcePlaylistId: run.sourcePlaylistId,
+    sourceTitle: ready().getPlaylist(run.sourcePlaylistId)?.title ?? run.sourcePlaylistId,
+    dimension: run.dimension,
+    status: run.status,
+    createdAt: run.createdAt,
+    quotaUsed: run.quotaUsed,
+    writesDone: run.writesDone,
+    groupCount: groups.length,
+    total: groups.reduce((sum, g) => sum + g.total, 0),
+    written: groups.reduce((sum, g) => sum + g.written, 0),
+  };
+}
+
+function startJob(...args: Parameters<JobRunner["start"]>): JobView {
+  try {
+    return jobs.start(...args);
+  } catch (err) {
+    throw new ApiError(409, err instanceof Error ? err.message : String(err));
+  }
+}
+
+// --- the routes ----------------------------------------------------------------------
+
+type Handler = (params: string[], body: Record<string, unknown>) => unknown;
+
+const routes: [string, RegExp, Handler][] = [
+  [
+    "GET",
+    /^\/api\/status$/,
+    (): StatusResponse => ({
+      version: VERSION,
+      // On a static deploy the "client secrets" are the two keys the user pasted.
+      hasClientSecrets: hasGoogleClient(),
+      clientSecretsError: hasGoogleClient()
+        ? null
+        : "Add your Google client ID and secret in Settings.",
+      signedIn: isSignedIn(),
+      sources: providerStatuses(envVars()),
+      dailyQuota: DAILY_QUOTA,
+    }),
+  ],
+  ["POST", /^\/api\/auth\/start$/, async () => ({ url: await startAuth() })],
+  [
+    "POST",
+    /^\/api\/auth\/complete$/,
+    async (_p, body) => {
+      if (typeof body.url !== "string") throw new ApiError(400, "url is required");
+      await completeAuth(body.url);
+      return { ok: true };
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/auth\/signout$/,
+    () => {
+      signOut();
+      return { ok: true };
+    },
+  ],
+
+  ["GET", /^\/api\/playlists$/, () => ready().listPlaylists()],
+  [
+    "POST",
+    /^\/api\/playlists$/,
+    (_p, body) => {
+      if (typeof body.url !== "string") throw new ApiError(400, "url is required");
+      let playlistId: string;
+      try {
+        playlistId = parsePlaylistId(body.url);
+      } catch (err) {
+        throw new ApiError(400, (err as Error).message);
+      }
+      const yt = youtube();
+      return startJob("fetch", "Reading playlist from YouTube", { playlistId }, async (ctx) => {
+        const quotaAtStart = yt.quotaUsed;
+        const title = await yt.getPlaylistTitle(playlistId);
+        const entries = await yt.playlistEntries(playlistId);
+        ready().savePlaylist(playlistId, title, entries);
+        const missing = ready().videoIdsMissingDetails(playlistId);
+        if (missing.length > 0) ready().setVideoDetails(await yt.videoDetails(missing));
+        ctx.log(`${entries.length} tracks, ${missing.length} new`);
+        const quota = yt.quotaUsed - quotaAtStart;
+        return `Added "${title}" (${entries.length} tracks, ${quota} quota units)`;
+      });
+    },
+  ],
+  [
+    "GET",
+    /^\/api\/playlists\/([\w-]+)$/,
+    ([id = ""]): PlaylistDetail => {
+      const playlist = requirePlaylist(id);
+      const tags = new Map<string, TrackView["tags"]>();
+      for (const t of ready().playlistAllTags(id)) {
+        const list = tags.get(t.videoId) ?? [];
+        list.push({
+          dimension: t.dimension,
+          value: t.value,
+          source: t.source,
+          rawTag: t.rawTag,
+          weight: t.weight,
+        });
+        tags.set(t.videoId, list);
+      }
+      const tracks = ready()
+        .playlistTracks(id)
+        .map(
+          (t): TrackView => ({
+            videoId: t.videoId,
+            title: t.title,
+            channel: t.channel,
+            durationS: t.durationS,
+            artist: t.artist,
+            songTitle: t.songTitle,
+            enriched: t.enrichedAt !== null && t.failedProviders.length === 0,
+            retryProviders: t.failedProviders,
+            tags: tags.get(t.videoId) ?? [],
+          }),
+        );
+      return { playlist, tracks };
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/playlists\/([\w-]+)\/enrich$/,
+    ([id = ""], body) => {
+      const playlist = requirePlaylist(id);
+      const req = body as EnrichRequest;
+      const maxApiCalls = optionalPositiveInt(req.maxApiCalls, "maxApiCalls");
+      const { enrichers: made, budget } = enrichers(maxApiCalls);
+      return startJob("enrich", `Tagging "${playlist.title}"`, { playlistId: id }, async (ctx) => {
+        const summary = await enrichPlaylist(ready(), id, made, {
+          force: req.force === true,
+          signal: ctx.signal,
+          onProgress: (done, total, track) => {
+            ctx.progress(done, total);
+            ctx.log(track.title);
+          },
+        });
+        let message = `Tagged ${summary.enriched} tracks with ${budget.used} API calls`;
+        if (summary.retryLater > 0) {
+          message += `; ${summary.retryLater} missed a source that did not answer and will be retried next time`;
+        }
+        if (summary.stoppedByBudget) message += "; stopped at the API call limit";
+        if (summary.remaining > 0) message += `; ${summary.remaining} left`;
+        return message;
+      });
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/playlists\/([\w-]+)\/preview$/,
+    ([id = ""], body): PreviewResponse => {
+      requirePlaylist(id);
+      const req = body as Partial<PreviewRequest>;
+      const dimension = dimensionOf(req.dimension);
+      return planGroups(ready().playlistTracks(id), ready().playlistTags(id, dimension), {
+        dimension,
+        minSize: optionalPositiveInt(req.minSize, "minSize") ?? 5,
+        maxGroupsPerTrack: optionalPositiveInt(req.maxGroupsPerTrack, "maxGroupsPerTrack"),
+        includeLeftovers: req.includeLeftovers !== false,
+      });
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/playlists\/([\w-]+)\/runs$/,
+    ([id = ""], body) => {
+      requirePlaylist(id);
+      const req = body as Partial<CreateRunRequest>;
+      const dimension = dimensionOf(req.dimension);
+      const minSize = optionalPositiveInt(req.minSize, "minSize") ?? 1;
+      const allowed = new Set(
+        ready()
+          .playlistTracks(id)
+          .map((t) => t.videoId),
+      );
+      const groups = validateGroups(req.groups, allowed);
+      return { runId: ready().createRun(id, dimension, minSize, groups) };
+    },
+  ],
+
+  ["GET", /^\/api\/runs$/, () => ready().listRuns().map(runSummary)],
+  [
+    "GET",
+    /^\/api\/runs\/(\d+)$/,
+    ([id = ""]): RunDetail => {
+      const run = requireRun(id);
+      return {
+        run: runSummary(run),
+        groups: ready()
+          .runGroupProgress(run.runId)
+          .map((g) => ({
+            groupId: g.groupId,
+            name: g.name,
+            targetPlaylistId: g.targetPlaylistId,
+            total: g.total,
+            written: g.written,
+            watchLinks: watchLinks(
+              ready()
+                .groupItems(g.groupId)
+                .map((i) => i.videoId),
+            ),
+          })),
+      };
+    },
+  ],
+  [
+    "DELETE",
+    /^\/api\/runs\/(\d+)$/,
+    ([id = ""]) => {
+      // Playlists it already created stay on YouTube.
+      const run = requireRun(id);
+      const current = jobs.current();
+      if (current?.status === "running" && current.runId === run.runId) {
+        throw new ApiError(409, "This run is being applied");
+      }
+      ready().deleteRun(run.runId);
+      return { ok: true };
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/apply$/,
+    ([id = ""], body) => {
+      const run = requireRun(id);
+      if (run.status === "done") throw new ApiError(409, "This run is already done");
+      const req = body as Partial<ApplyRequest>;
+      const privacy: Privacy = req.privacy ?? "private";
+      if (!["private", "unlisted", "public"].includes(privacy)) {
+        throw new ApiError(400, "privacy must be private, unlisted or public");
+      }
+      const maxWrites = optionalPositiveInt(req.maxWrites, "maxWrites");
+      const yt = youtube();
+      const title = ready().getPlaylist(run.sourcePlaylistId)?.title ?? run.sourcePlaylistId;
+      return startJob(
+        "apply",
+        `Creating playlists from "${title}"`,
+        { runId: run.runId, playlistId: run.sourcePlaylistId },
+        async (ctx) => {
+          const result = await applyRun(ready(), yt, run.runId, {
+            privacy,
+            maxWrites,
+            signal: ctx.signal,
+            log: ctx.log,
+            onProgress: ctx.progress,
+          });
+          const parts = [
+            `Created ${result.playlistsCreated} playlists`,
+            `added ${result.tracksAdded} tracks`,
+          ];
+          if (result.tracksSkipped) parts.push(`skipped ${result.tracksSkipped} unavailable`);
+          parts.push(`used ${result.quotaUsed} quota units`);
+          let message = parts.join(", ");
+          if (result.reason === "quota") {
+            message += ". Daily quota reached; resume after midnight Pacific time";
+          } else if (result.reason === "limit") {
+            message += ". Stopped at the write limit; resume to continue";
+          }
+          return message;
+        },
+      );
+    },
+  ],
+
+  ["GET", /^\/api\/job$/, () => jobs.current()],
+  ["POST", /^\/api\/job\/cancel$/, () => ({ ok: jobs.cancel() })],
+];
+
+/**
+ * Drop-in replacement for the HTTP `api()`. Same signature, same errors: callers cannot tell
+ * whether a server answered or this module did.
+ */
+export async function api<T>(
+  path: string,
+  init: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const method = init.method ?? "GET";
+  const body = asObject(init.body);
+  for (const [routeMethod, pattern, handler] of routes) {
+    const match = pattern.exec(path);
+    if (!match) continue;
+    if (routeMethod !== method) continue;
+    try {
+      return (await handler(match.slice(1), body)) as T;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, err instanceof Error ? err.message : String(err));
+    }
+  }
+  throw new ApiError(404, `No route for ${method} ${path}`);
+}
