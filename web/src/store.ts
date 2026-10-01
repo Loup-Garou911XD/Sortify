@@ -19,6 +19,13 @@ import type {
   Track,
   TrackTag,
 } from "../../backend/src/db.ts";
+import {
+  type MergeNotes,
+  mergeSnapshots,
+  SNAPSHOT_VERSION,
+  type Snapshot,
+  type Syncable,
+} from "../../backend/src/sync/snapshot.ts";
 
 const DB_NAME = "sortify";
 /** 2 split the single blob-per-collection store into one record per track, tag and lookup. */
@@ -26,6 +33,8 @@ const DB_VERSION = 2;
 /** The v1 store: one record per collection. Read once on upgrade, then dropped. */
 const LEGACY = "records";
 const FLUSH_MS = 600;
+/** How long to wait for another tab to release an older database before giving up on it. */
+const BLOCKED_MS = 3000;
 const SEP = "\x00";
 
 /**
@@ -67,7 +76,8 @@ interface RunHeader {
   seq: { run: number; group: number };
 }
 
-interface Snapshot {
+/** A copy of the collections a transaction can touch, kept so `tx` can undo a failure. */
+interface Rollback {
   playlists: Map<string, PlaylistRow>;
   tracks: Map<string, TrackRow>;
   tags: Map<string, Tag[]>;
@@ -84,8 +94,24 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-function idb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+/**
+ * Opens the database, or resolves `null` when it cannot be used.
+ *
+ * It never rejects and never hangs: a page that cannot reach storage still has to render. The
+ * case that matters is `blocked` — another tab holding an older version open stops the upgrade,
+ * and a promise that simply waits there would leave this page blank for ever.
+ */
+function idb(): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (db: IDBDatabase | null) => {
+      if (settled) {
+        db?.close();
+        return;
+      }
+      settled = true;
+      resolve(db);
+    };
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -121,12 +147,24 @@ function idb(): Promise<IDBDatabase> {
         cursor.continue();
       };
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("IndexedDB unavailable"));
+    req.onsuccess = () => {
+      const db = req.result;
+      // Yield to a tab that wants to upgrade, instead of blocking it the way we were blocked.
+      db.onversionchange = () => db.close();
+      finish(db);
+    };
+    req.onerror = () => finish(null);
+    req.onblocked = () => {
+      console.warn(
+        "Sortify: another tab is holding an older version of the local database open. " +
+          "Close it and reload to keep your cached playlists.",
+      );
+      setTimeout(() => finish(null), BLOCKED_MS);
+    };
   });
 }
 
-export class BrowserStore {
+export class BrowserStore implements Syncable {
   private readonly playlists = new Map<string, PlaylistRow>();
   private readonly tracks = new Map<string, TrackRow>();
   private readonly tags = new Map<string, Tag[]>();
@@ -143,22 +181,36 @@ export class BrowserStore {
 
   private constructor(private readonly db: IDBDatabase | null) {}
 
-  /** Opens the database and loads the model. Falls back to memory-only if storage is blocked. */
+  /**
+   * Opens the database and loads the model. Anything that goes wrong with storage leaves a
+   * working memory-only store rather than a page that never renders.
+   */
   static async open(): Promise<BrowserStore> {
     let db: IDBDatabase | null = null;
     try {
       db = await idb();
-    } catch {
-      // Private browsing or blocked storage: the app still runs, it just forgets on reload.
+      if (db) {
+        const store = new BrowserStore(db);
+        await store.load(db);
+        store.watchForClose();
+        return store;
+      }
+    } catch (err) {
+      console.warn("Sortify: could not read the local database, continuing without it.", err);
+      db?.close();
+      db = null;
     }
     const store = new BrowserStore(db);
-    if (db) await store.load(db);
-    // A tab closing mid-debounce would otherwise lose the last few hundred milliseconds.
-    addEventListener("pagehide", () => store.flush());
-    addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") store.flush();
-    });
+    store.watchForClose();
     return store;
+  }
+
+  /** A tab closing mid-debounce would otherwise lose the last few hundred milliseconds. */
+  private watchForClose(): void {
+    addEventListener("pagehide", () => this.flush());
+    addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") this.flush();
+    });
   }
 
   /** Reads every store in one transaction, so startup costs one round trip rather than six. */
@@ -262,7 +314,7 @@ export class BrowserStore {
    */
   tx<T>(fn: () => T): T {
     if (this.inTx) return fn();
-    const snapshot: Snapshot = {
+    const snapshot: Rollback = {
       playlists: new Map(this.playlists),
       tracks: new Map(this.tracks),
       tags: new Map(this.tags),
@@ -284,7 +336,7 @@ export class BrowserStore {
     }
   }
 
-  private restore(s: Snapshot): void {
+  private restore(s: Rollback): void {
     const reset = <K, V>(target: Map<K, V>, from: Map<K, V>): void => {
       target.clear();
       for (const [k, v] of from) target.set(k, v);
@@ -577,5 +629,96 @@ export class BrowserStore {
       const items = this.items.get(g.groupId) ?? [];
       return { ...g, total: items.length, written: items.filter((i) => i.written).length };
     });
+  }
+
+  // --- sync ---------------------------------------------------------------------
+
+  /** Everything worth carrying between devices, in the shape both stores agree on. */
+  snapshot(): Snapshot {
+    return {
+      version: SNAPSHOT_VERSION,
+      updatedAt: now(),
+      playlists: [...this.playlists].map(([playlistId, row]) => ({
+        playlistId,
+        title: row.title,
+        fetchedAt: row.fetchedAt,
+        videoIds: row.items,
+      })),
+      tracks: [...this.tracks.values()],
+      tags: [...this.tags].map(([videoId, tags]) => ({ videoId, tags })),
+      cache: [...this.cache].map(([id, body]) => {
+        const at = id.indexOf(SEP);
+        return { source: id.slice(0, at), key: id.slice(at + 1), body };
+      }),
+      runs: this.runs.map((run) => ({
+        ...run,
+        groups: this.runGroups(run.runId).map((g) => ({
+          groupId: g.groupId,
+          name: g.name,
+          targetPlaylistId: g.targetPlaylistId,
+          items: this.groupItems(g.groupId).map((i) => ({
+            videoId: i.videoId,
+            position: i.position,
+            written: i.written,
+          })),
+        })),
+      })),
+      seq: { ...this.seq },
+    };
+  }
+
+  /** Folds a remote snapshot in, replaces the model with the result, and persists all of it. */
+  absorb(remote: Snapshot): MergeNotes {
+    const { merged, notes } = mergeSnapshots(this.snapshot(), remote);
+    this.playlists.clear();
+    this.tracks.clear();
+    this.tags.clear();
+    this.cache.clear();
+    this.items.clear();
+
+    for (const p of merged.playlists) {
+      this.playlists.set(p.playlistId, {
+        title: p.title,
+        fetchedAt: p.fetchedAt,
+        items: p.videoIds,
+      });
+      this.touch("playlists", p.playlistId);
+    }
+    for (const t of merged.tracks) {
+      this.tracks.set(t.videoId, t);
+      this.touch("tracks", t.videoId);
+    }
+    for (const entry of merged.tags) {
+      this.tags.set(entry.videoId, entry.tags);
+      this.touch("tags", entry.videoId);
+    }
+    for (const c of merged.cache) {
+      const id = c.source + SEP + c.key;
+      this.cache.set(id, c.body);
+      this.touch("cache", id);
+    }
+    this.runs = merged.runs.map(({ groups: _groups, ...run }) => run);
+    this.groups = merged.runs.flatMap((run) =>
+      run.groups.map((g) => ({
+        groupId: g.groupId,
+        runId: run.runId,
+        name: g.name,
+        targetPlaylistId: g.targetPlaylistId,
+      })),
+    );
+    for (const run of merged.runs) {
+      for (const g of run.groups) {
+        this.items.set(
+          g.groupId,
+          g.items.map((i) => ({ ...i, groupId: g.groupId })),
+        );
+        this.touch("items", g.groupId);
+      }
+    }
+    this.seq = merged.seq;
+    this.touchRuns();
+    // A merge is rare and the result must survive a close, so do not wait for the debounce.
+    this.flush();
+    return notes;
   }
 }

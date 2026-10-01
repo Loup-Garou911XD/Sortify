@@ -2,6 +2,13 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { DIMENSIONS, type Dimension, type TagSource } from "./api/types.ts";
+import {
+  type MergeNotes,
+  mergeSnapshots,
+  SNAPSHOT_VERSION,
+  type Snapshot,
+  type Syncable,
+} from "./sync/snapshot.ts";
 
 export type { Dimension, TagSource };
 // Re-exported so callers that already reach for the store keep working.
@@ -158,13 +165,34 @@ const now = (): string => new Date().toISOString();
 
 /** Thin typed layer over the SQLite cache. Every stage reads and writes through it. */
 /**
- * What every stage outside this file needs from the cache: `Store` minus its SQLite handle.
- * A mapped type drops private members, so an alternative implementation (the browser app's
- * IndexedDB store) can satisfy this structurally and be typechecked against it.
+ * What every stage outside this file needs from the cache: `Store` minus its SQLite handle and
+ * minus syncing, which belongs to `Syncable` and is no business of the pipeline. A mapped type
+ * drops private members, so an alternative implementation (the browser app's IndexedDB store)
+ * can satisfy this structurally and be typechecked against it.
  */
-export type Cache = Omit<Store, "db" | "close">;
+export type Cache = Omit<Store, "db" | "close" | "snapshot" | "absorb">;
 
-export class Store {
+interface GroupRow {
+  groupId: number;
+  runId: number;
+  name: string;
+  targetPlaylistId: string | null;
+}
+
+interface TrackRow {
+  videoId: string;
+  title: string;
+  channel: string;
+  durationS: number | null;
+  topics: string | null;
+  artist: string | null;
+  songTitle: string | null;
+  externalIds: string | null;
+  failedProviders: string | null;
+  enrichedAt: string | null;
+}
+
+export class Store implements Syncable {
   readonly db: DatabaseSync;
   private readonly statements = new Map<string, StatementSync>();
 
@@ -489,5 +517,193 @@ export class Store {
       this.prep("DELETE FROM run_groups WHERE run_id = ?").run(runId);
       this.prep("DELETE FROM runs WHERE run_id = ?").run(runId);
     });
+  }
+
+  // --- sync ---------------------------------------------------------------------
+
+  /** Everything worth carrying between devices, in the shape both stores agree on. */
+  snapshot(): Snapshot {
+    const rows = <T>(sql: string): T[] => this.prep(sql).all() as unknown as T[];
+    const items = new Map<number, { videoId: string; position: number; written: boolean }[]>();
+    for (const r of rows<{ groupId: number; videoId: string; position: number; written: number }>(
+      "SELECT group_id AS groupId, video_id AS videoId, position, written FROM run_items ORDER BY position",
+    )) {
+      const list = items.get(r.groupId) ?? [];
+      list.push({ videoId: r.videoId, position: r.position, written: r.written === 1 });
+      items.set(r.groupId, list);
+    }
+    const groups = new Map<number, GroupRow[]>();
+    for (const g of rows<GroupRow>(
+      "SELECT group_id AS groupId, run_id AS runId, name, target_playlist_id AS targetPlaylistId FROM run_groups ORDER BY group_id",
+    )) {
+      groups.set(g.runId, [...(groups.get(g.runId) ?? []), g]);
+    }
+    const members = new Map<string, string[]>();
+    for (const r of rows<{ playlistId: string; videoId: string }>(
+      "SELECT playlist_id AS playlistId, video_id AS videoId FROM playlist_items ORDER BY position",
+    )) {
+      members.set(r.playlistId, [...(members.get(r.playlistId) ?? []), r.videoId]);
+    }
+    const tags = new Map<string, Tag[]>();
+    for (const t of rows<TrackTag>(
+      "SELECT video_id AS videoId, dimension, value, raw_tag AS rawTag, source, weight FROM track_tags",
+    )) {
+      const { videoId, ...tag } = t;
+      tags.set(videoId, [...(tags.get(videoId) ?? []), tag]);
+    }
+
+    // AUTOINCREMENT remembers the highest id ever handed out, even for deleted rows, so a
+    // merged-in run can never be given an id this database has already used.
+    const highest = (table: string, column: string): number => {
+      const seq = this.prep("SELECT seq FROM sqlite_sequence WHERE name = ?").get(table) as
+        | { seq: number }
+        | undefined;
+      const max = this.prep(`SELECT COALESCE(MAX(${column}), 0) AS n FROM ${table}`).get() as {
+        n: number;
+      };
+      return Math.max(seq?.seq ?? 0, max.n);
+    };
+
+    return {
+      version: SNAPSHOT_VERSION,
+      updatedAt: now(),
+      playlists: rows<{ playlistId: string; title: string; fetchedAt: string }>(
+        "SELECT playlist_id AS playlistId, title, fetched_at AS fetchedAt FROM playlists",
+      ).map((p) => ({ ...p, videoIds: members.get(p.playlistId) ?? [] })),
+      tracks: rows<TrackRow>(
+        `SELECT video_id AS videoId, title, channel, duration_s AS durationS, topics,
+                artist, song_title AS songTitle, external_ids AS externalIds,
+                failed_providers AS failedProviders, enriched_at AS enrichedAt FROM tracks`,
+      ).map((t) => ({
+        videoId: t.videoId,
+        title: t.title,
+        channel: t.channel,
+        durationS: t.durationS,
+        topics: t.topics ? (JSON.parse(t.topics) as string[]) : null,
+        artist: t.artist,
+        songTitle: t.songTitle,
+        externalIds: t.externalIds ? (JSON.parse(t.externalIds) as Record<string, string>) : {},
+        failedProviders: t.failedProviders ? (JSON.parse(t.failedProviders) as string[]) : [],
+        enrichedAt: t.enrichedAt,
+      })),
+      tags: [...tags].map(([videoId, list]) => ({ videoId, tags: list })),
+      cache: rows<{ source: string; key: string; body: string }>(
+        "SELECT source, key, body FROM lookup_cache",
+      ).map((c) => ({ source: c.source, key: c.key, body: JSON.parse(c.body) as unknown })),
+      runs: this.listRuns().map((run) => ({
+        ...run,
+        groups: (groups.get(run.runId) ?? []).map((g) => ({
+          groupId: g.groupId,
+          name: g.name,
+          targetPlaylistId: g.targetPlaylistId,
+          items: items.get(g.groupId) ?? [],
+        })),
+      })),
+      seq: { run: highest("runs", "run_id"), group: highest("run_groups", "group_id") },
+    };
+  }
+
+  /** Folds a remote snapshot in and writes the result back as one transaction. */
+  absorb(remote: Snapshot): MergeNotes {
+    const { merged, notes } = mergeSnapshots(this.snapshot(), remote);
+    this.tx(() => {
+      for (const table of [
+        "run_items",
+        "run_groups",
+        "runs",
+        "playlist_items",
+        "track_tags",
+        "tracks",
+        "playlists",
+        "lookup_cache",
+      ]) {
+        this.prep(`DELETE FROM ${table}`).run();
+      }
+      const track = this.prep(
+        `INSERT INTO tracks (video_id, title, channel, duration_s, topics, artist, song_title,
+           external_ids, failed_providers, enriched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const t of merged.tracks) {
+        track.run(
+          t.videoId,
+          t.title,
+          t.channel,
+          t.durationS,
+          t.topics === null ? null : JSON.stringify(t.topics),
+          t.artist,
+          t.songTitle,
+          JSON.stringify(t.externalIds),
+          t.failedProviders.length > 0 ? JSON.stringify(t.failedProviders) : null,
+          t.enrichedAt,
+        );
+      }
+      const playlist = this.prep(
+        "INSERT INTO playlists (playlist_id, title, fetched_at) VALUES (?, ?, ?)",
+      );
+      const member = this.prep(
+        "INSERT INTO playlist_items (playlist_id, video_id, position) VALUES (?, ?, ?)",
+      );
+      for (const p of merged.playlists) {
+        playlist.run(p.playlistId, p.title, p.fetchedAt);
+        p.videoIds.forEach((videoId, position) => {
+          member.run(p.playlistId, videoId, position);
+        });
+      }
+      const tag = this.prep(
+        `INSERT INTO track_tags (video_id, dimension, value, raw_tag, source, weight)
+         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+      );
+      for (const entry of merged.tags) {
+        for (const t of entry.tags) {
+          tag.run(entry.videoId, t.dimension, t.value, t.rawTag, t.source, t.weight);
+        }
+      }
+      const cache = this.prep(
+        "INSERT INTO lookup_cache (source, key, body, fetched_at) VALUES (?, ?, ?, ?)",
+      );
+      for (const c of merged.cache) {
+        cache.run(c.source, c.key, JSON.stringify(c.body), merged.updatedAt);
+      }
+      const run = this.prep(
+        `INSERT INTO runs (run_id, source_playlist_id, dimension, min_size, created_at, status,
+           quota_used, writes_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const group = this.prep(
+        "INSERT INTO run_groups (group_id, run_id, name, target_playlist_id) VALUES (?, ?, ?, ?)",
+      );
+      const item = this.prep(
+        "INSERT INTO run_items (group_id, video_id, position, written) VALUES (?, ?, ?, ?)",
+      );
+      for (const r of merged.runs) {
+        run.run(
+          r.runId,
+          r.sourcePlaylistId,
+          r.dimension,
+          r.minSize,
+          r.createdAt,
+          r.status,
+          r.quotaUsed,
+          r.writesDone,
+        );
+        for (const g of r.groups) {
+          group.run(g.groupId, r.runId, g.name, g.targetPlaylistId);
+          for (const i of g.items) item.run(g.groupId, i.videoId, i.position, i.written ? 1 : 0);
+        }
+      }
+      // Keep AUTOINCREMENT past every id the merge settled on, including renumbered ones and
+      // ids whose rows have since been deleted. sqlite_sequence has no unique key, so this is
+      // an update-or-insert rather than an upsert.
+      const hasSeq = this.prep("SELECT 1 AS present FROM sqlite_sequence WHERE name = ?");
+      const raiseSeq = this.prep("UPDATE sqlite_sequence SET seq = max(seq, ?) WHERE name = ?");
+      const addSeq = this.prep("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)");
+      const bump = (table: string, value: number): void => {
+        if (value <= 0) return;
+        if (hasSeq.get(table)) raiseSeq.run(value, table);
+        else addSeq.run(table, value);
+      };
+      bump("runs", merged.seq.run);
+      bump("run_groups", merged.seq.group);
+    });
+    return notes;
   }
 }
