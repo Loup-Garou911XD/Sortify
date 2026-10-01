@@ -29,14 +29,23 @@ passes nothing and its rows stay plain text, exactly as before.
 
 1. **Deploy it.** Settings → Pages → Source: GitHub Actions. Push to `main`; the workflow in
    `.github/workflows/pages.yml` builds and publishes it.
+
+   The site has to be built for the path it is served from. `web/public/CNAME` decides that: with
+   a custom domain the site sits at the domain root, so the workflow builds with `SORTIFY_BASE=/`;
+   without one it is a project page under `/<repo>/`. Put the domain in that file when you set a
+   custom domain, and delete the file if you stop using one — otherwise every asset URL is wrong
+   and the page loads as a blank screen.
 2. **Create a Google OAuth client.** In Google Cloud Console, enable **YouTube Data API v3**,
    then create an OAuth client ID of type **Web application**. The two fields take different
    values, and neither accepts the other's:
 
    | Field | Value | Rule |
    | --- | --- | --- |
-   | Authorized JavaScript origins | `https://<user>.github.io` | An origin only: scheme, host, port. A path is rejected. |
-   | Authorized redirect URIs | `https://<user>.github.io/Sortify/` | Matched exactly, path and trailing slash included. |
+   | Authorized JavaScript origins | `https://sortify.example.com` | An origin only: scheme, host, port. A path is rejected. |
+   | Authorized redirect URIs | `https://sortify.example.com/` | Matched exactly, path and trailing slash included. |
+
+   Both change if you move the site, so update them whenever the URL does — a stale redirect URI
+   fails sign-in with `redirect_uri_mismatch`.
 
    The YouTube dialog under Connections prints both values for your own deploy, so copy them
    from there. Add yourself as a test user while the app is in testing mode.

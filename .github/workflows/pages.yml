@@ -32,11 +32,18 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # web/public/CNAME is the single source of truth for the custom domain: Pages reads it to
+      # keep the domain, and a custom domain serves the site from the root rather than /<repo>/.
+      - name: Work out the path the site is served from
+        run: |
+          if [ -f web/public/CNAME ]; then
+            echo "Custom domain $(cat web/public/CNAME): serving from /"
+            echo "SORTIFY_BASE=/" >> "$GITHUB_ENV"
+          else
+            echo "Project page: serving from /${{ github.event.repository.name }}/"
+            echo "SORTIFY_BASE=/${{ github.event.repository.name }}/" >> "$GITHUB_ENV"
+          fi
       - run: npm run build:web
-        env:
-          # A project page is served from /<repo>/. For a user site or a custom domain,
-          # set this to / instead.
-          SORTIFY_BASE: /${{ github.event.repository.name }}/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
