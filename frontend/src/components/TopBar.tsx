@@ -105,7 +105,7 @@ export function TopBar({
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
-  const { status, theme, setTheme, openSignIn, refresh, notify, navigate, configureSource } =
+  const { status, sync, theme, setTheme, openSignIn, refresh, notify, navigate, configureSource } =
     useApp();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -223,20 +223,20 @@ export function TopBar({
                   </MenuItem>
                 )}
 
-                {status.sync && (
+                {sync && (
                   <>
                     <div className="menu-sep" />
                     <div className="menu-label menu-label-row">
                       <span className="eyebrow">Sync</span>
-                      <span className="menu-count">{SYNC_LABEL[status.sync.state]}</span>
+                      <span className="menu-count">{SYNC_LABEL[sync.state]}</span>
                     </div>
                     <ul className="source-list">
                       <SourceRow
-                        on={status.sync.state === "idle"}
+                        on={sync.state === "idle"}
                         name="Google Drive"
-                        help={syncHelp(status.sync)}
+                        help={syncHelp(sync)}
                         onClick={
-                          status.sync.state === "needs-auth"
+                          sync.state === "needs-auth"
                             ? () => {
                                 close();
                                 openSignIn();

@@ -4,6 +4,7 @@ import type {
   PlaylistSummary,
   RunSummary,
   StatusResponse,
+  SyncView,
 } from "../../backend/src/api/types.ts";
 import { api } from "./api.ts";
 import { Home } from "./components/Home.tsx";
@@ -26,6 +27,8 @@ export interface Toast {
 
 export interface AppState {
   status: StatusResponse | undefined;
+  /** Sync state, polled on its own so it stays live without refetching everything. */
+  sync: SyncView | null;
   playlists: PlaylistSummary[];
   runs: RunSummary[];
   job: JobView | null;
@@ -108,9 +111,14 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
   // Only a merge that brought something in is recorded, so the first one seen after this page
   // loaded still triggers a refresh even if it landed before the first status read.
   const mergedAt = useRef<string | null>(null);
+  const [sync, setSync] = useState<SyncView | null>(null);
   const checkSync = useCallback(async () => {
     const current = await api<StatusResponse>("/api/status").catch(() => null);
-    if (!current?.sync?.changed || current.sync.at === mergedAt.current) return;
+    if (!current) return;
+    // Always take the latest state: the panel would otherwise keep showing whatever the first
+    // status read happened to catch, which is "syncing" more often than not.
+    setSync(current.sync);
+    if (!current.sync?.changed || current.sync.at === mergedAt.current) return;
     mergedAt.current = current.sync.at;
     refresh();
   }, [refresh]);
@@ -144,6 +152,7 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
 
   const state: AppState = {
     status: status.data,
+    sync: sync ?? status.data?.sync ?? null,
     playlists: playlists.data ?? [],
     runs: runs.data ?? [],
     job,

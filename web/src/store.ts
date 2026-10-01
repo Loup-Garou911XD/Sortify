@@ -673,6 +673,19 @@ export class BrowserStore implements Syncable {
 
   /** Folds a remote snapshot in, replaces the model with the result, and persists all of it. */
   absorb(remote: Snapshot): MergeNotes {
+    // A merge is the store writing to itself. Reporting those writes would schedule another
+    // sync, which would merge again, and so on for ever — so the hook is off for the whole of
+    // it, not just the last call, and restored even if something throws.
+    const notify = this.onWrite;
+    this.onWrite = undefined;
+    try {
+      return this.merge(remote);
+    } finally {
+      this.onWrite = notify;
+    }
+  }
+
+  private merge(remote: Snapshot): MergeNotes {
     const { merged, notes } = mergeSnapshots(this.snapshot(), remote);
     this.playlists.clear();
     this.tracks.clear();
@@ -720,10 +733,7 @@ export class BrowserStore implements Syncable {
       }
     }
     this.seq = merged.seq;
-    const notify = this.onWrite;
-    this.onWrite = undefined;
     this.touchRuns();
-    this.onWrite = notify;
     // A merge is rare and the result must survive a close, so do not wait for the debounce.
     this.flush();
     return notes;

@@ -352,6 +352,13 @@ input[type="checkbox"] {
 
 .add-form {
   display: grid;
+  /*
+   * An auto column sizes to its widest item's min-content, and .add-row's is the text input's
+   * intrinsic `size` width plus the button — about 250px, which no amount of narrowing reduces.
+   * The rail then scrolls sideways and clips the button as soon as a vertical scrollbar takes
+   * a few pixels. minmax(0, 1fr) caps the column at the container so the input can shrink.
+   */
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
   padding: 0 4px;
 }
@@ -392,11 +399,14 @@ input[type="checkbox"] {
   margin: 0;
   padding: 0;
   display: grid;
+  /* Same reason as .add-form: an auto column would size to a long title and never give way. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
 }
 .nav-item {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   padding: 8px 10px;
   border-radius: var(--r-2);
