@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { type Credentials, OAuth2Client } from "google-auth-library";
@@ -15,6 +14,17 @@ import { DRIVE_SCOPE } from "../sync/drive.ts";
  * stored consent, so a sign-in made before it was added has to be repeated.
  */
 export const SCOPES = ["https://www.googleapis.com/auth/youtube", DRIVE_SCOPE];
+
+/**
+ * The loopback port `sortify auth` listens on for Google's redirect.
+ *
+ * Fixed, not free-chosen: Google matches redirect URIs exactly, so the port has to be one
+ * registered on the OAuth client. That is what lets a single Web application client serve the
+ * CLI, `sortify ui` and the browser build. It differs from the default `sortify ui` port so a
+ * running server can never take it.
+ */
+export const AUTH_PORT = 4748;
+export const AUTH_REDIRECT_URI = `http://127.0.0.1:${AUTH_PORT}/`;
 
 interface ClientSecrets {
   clientId: string;
@@ -229,9 +239,21 @@ export async function authorize(config: Config, log: (line: string) => void): Pr
     res.writeHead(handled ? 200 : 404, { "content-type": "text/plain" });
     res.end(handled ? "Sortify is signed in. You can close this tab." : "Not found");
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  const redirectUri = `http://127.0.0.1:${port}`;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(AUTH_PORT, "127.0.0.1", resolve);
+    });
+  } catch (err) {
+    const reason =
+      (err as NodeJS.ErrnoException).code === "EADDRINUSE" ? "it is in use" : String(err);
+    throw new Error(
+      `Cannot listen on 127.0.0.1:${AUTH_PORT} for the sign-in redirect because ${reason}. ` +
+        "Google only accepts redirect URIs registered on the OAuth client, so another port " +
+        "would be rejected. Free that port, or sign in through `sortify ui` instead.",
+    );
+  }
+  const redirectUri = AUTH_REDIRECT_URI;
 
   const client = new OAuth2Client({ clientId, clientSecret, redirectUri });
   const { codeVerifier, codeChallenge } = await client.generateCodeVerifierAsync();

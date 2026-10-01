@@ -63,6 +63,14 @@ already uses just also asks for `drive.appdata` (`SCOPES` in `youtube/auth.ts` a
 `web/src/auth.ts`). **Adding that scope invalidates existing consent**, so a sign-in made before
 it has to be repeated — `sortify auth` again, and Connect YouTube again in the browser.
 
+**One OAuth client serves all three shells**, of type Web application. Google exempts loopback
+addresses from its HTTPS-only rule, so `http://127.0.0.1:<port>/` can be registered on a Web
+client; the match is exact, including port and trailing slash. That is why `sortify auth` listens
+on the fixed `AUTH_PORT` (4748) rather than any free port — a random one could not be registered.
+`sortify ui` uses its own port (4747) and the static build its deploy URL. The single credential
+lives in `SORTIFY_CLIENT_SECRETS`; the browser build takes the id and secret out of that same
+JSON through its `.env` import.
+
 - `sync/snapshot.ts` is the travelling shape and the merge rules, free of `node:` imports so both
   shells share it. Merging is per record: tracks by `videoId` with the more recently tagged copy
   winning, tags following the winning track, the lookup cache unioned, playlists taking the newer

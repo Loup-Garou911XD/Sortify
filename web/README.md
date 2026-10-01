@@ -36,8 +36,18 @@ passes nothing and its rows stay plain text, exactly as before.
    custom domain, and delete the file if you stop using one — otherwise every asset URL is wrong
    and the page loads as a blank screen.
 2. **Create a Google OAuth client.** In Google Cloud Console, enable **YouTube Data API v3**,
-   then create an OAuth client ID of type **Web application**. The two fields take different
-   values, and neither accepts the other's:
+   then create an OAuth client ID of type **Web application**. One client covers everything —
+   the CLI, `sortify ui` and this build — because Google exempts loopback addresses from its
+   HTTPS rule, so `http://127.0.0.1:…` can be registered on a Web client.
+
+   | Authorized redirect URIs | For |
+   | --- | --- |
+   | `http://127.0.0.1:4747/` | `sortify ui` sign-in |
+   | `http://127.0.0.1:4748/` | `sortify auth` |
+   | `https://sortify.example.com/` | this build |
+
+   Only this build needs a JavaScript origin. The two fields take different values, and neither
+   accepts the other's:
 
    | Field | Value | Rule |
    | --- | --- | --- |
@@ -47,12 +57,13 @@ passes nothing and its rows stay plain text, exactly as before.
    Both change if you move the site, so update them whenever the URL does — a stale redirect URI
    fails sign-in with `redirect_uri_mismatch`.
 
-   The YouTube dialog under Connections prints both values for your own deploy, so copy them
-   from there. Add yourself as a test user while the app is in testing mode.
+   The YouTube dialog under Connections prints the two browser values for your own deploy, so
+   copy them from there. Add yourself as a test user while the app is in testing mode.
 3. **Open the site and use Connections in the top bar.** If your keys already sit in a `.env`
    file, **Import keys from a .env file** at the bottom of that panel reads them all at once,
-   under the same names the backend uses, and unwraps a Web application client stored as
-   `SORTIFY_CLIENT_SECRETS` JSON. File pickers hide dotfiles, so pasting the contents works too.
+   under the same names the backend uses, and takes the client id and secret straight out of the
+   `SORTIFY_CLIENT_SECRETS` JSON — so the one credential the backend uses is the one this build
+   uses, with nothing separate to keep in step. File pickers hide dotfiles, so pasting the contents works too.
    Otherwise enter them one at a time: every row in that panel is a button. Pick **YouTube** for
    the Google client ID and secret, or a tag source to see how to get its key. MusicBrainz,
    iTunes and YouTube topics need no key and say so.
