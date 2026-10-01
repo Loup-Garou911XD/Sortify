@@ -12,6 +12,20 @@ export type TagSource = string;
 export type RunStatus = "planned" | "applying" | "paused" | "done";
 export type Privacy = "private" | "unlisted" | "public";
 
+/** How the last attempt to sync with Google Drive went. Absent when a shell does not sync. */
+export interface SyncView {
+  state: "idle" | "syncing" | "offline" | "needs-auth";
+  /** Why it is not working, when it is not. */
+  message: string | null;
+  /** When the state was last settled. */
+  at: string;
+  /** The last merge brought in work from another device, so open pages are stale. */
+  changed: boolean;
+  /** Set when the last merge moved a run's id or could not take one. */
+  renamedRuns: { from: number; to: number; name: string }[];
+  conflictedRuns: number[];
+}
+
 export interface StatusResponse {
   version: string;
   hasClientSecrets: boolean;
@@ -21,6 +35,8 @@ export interface StatusResponse {
   /** Tagging providers in the order they are asked, from the backend's provider registry. */
   sources: ProviderStatus[];
   dailyQuota: number;
+  /** Null when this build does not sync, or when the user is not signed in. */
+  sync: SyncView | null;
 }
 
 export interface ProviderStatus {

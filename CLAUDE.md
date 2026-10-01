@@ -55,6 +55,45 @@ Design constraints worth keeping:
 - Personal use first: the Google app stays in testing mode; sharing with other users (app verification) is deferred.
 - External services are injected (`fetch`, `sleep`, `PlaylistWriter`), and tests use fakes and an in-memory `Store(":memory:")`. Tests never make network calls.
 
+## Sync (`sync/`)
+
+One dataset across devices, through a single file in Google Drive's `appDataFolder` — a hidden,
+per-app, per-user folder. No server and no new infrastructure: the OAuth client each shell
+already uses just also asks for `drive.appdata` (`SCOPES` in `youtube/auth.ts` and
+`web/src/auth.ts`). **Adding that scope invalidates existing consent**, so a sign-in made before
+it has to be repeated — `sortify auth` again, and Connect YouTube again in the browser.
+
+- `sync/snapshot.ts` is the travelling shape and the merge rules, free of `node:` imports so both
+  shells share it. Merging is per record: tracks by `videoId` with the more recently tagged copy
+  winning, tags following the winning track, the lookup cache unioned, playlists taking the newer
+  fetch whole. Details that cost YouTube quota (`durationS`, `topics`) are kept from whichever
+  side has them, even when the other copy wins.
+- **Run ids are the one hazard.** They are local counters on both sides, so two devices both mint
+  "run 3". A colliding run is renumbered — *except* when `idsAreFrozen()`: a run that has started
+  applying and still has a group with no recorded target may have a `[sortify run N group M]`
+  marker live on a YouTube playlist, and `apply` finds that playlist again by the marker. Moving
+  such an id would orphan the playlist and make the next apply create a duplicate. Those are
+  reported as conflicts instead. Once every target is recorded the marker is never read again, so
+  the run is safe to renumber. Runs are matched by identity (`createdAt` + source playlist), not
+  by id, so re-merging the same remote does not duplicate a run that was already moved.
+- `sync/drive.ts` is the Drive client, `fetch`-based with the token provider injected like
+  `YouTubeClient`. `sync/engine.ts` is pull → merge → push, debounced, guarded by Drive's
+  `modifiedTime`. Drive has no compare-and-swap on content, so a push can still be clobbered by
+  one landing microseconds earlier; that is safe because every push sends the merge of local and
+  remote, so the overwritten device restores its data on its next cycle.
+- Both stores implement `Syncable` (`snapshot()`/`absorb()`), and the compiler enforces it.
+  SQLite's `absorb` also bumps `sqlite_sequence`, or `AUTOINCREMENT` would hand out an id a merge
+  had just assigned to something else.
+- Wiring: `sortify ui` syncs on start, every 5 minutes, after each job and on shutdown — the
+  one-shot CLI commands need no changes, because their work travels on the server's next cycle.
+  The browser syncs on load, after writes and on page-hide. `/api/status` carries a `sync` view,
+  and the UI refreshes only when `changed` says a merge actually brought something in; a blanket
+  refresh would rebuild the sort preview and discard a half-edited plan.
+
+Note for the browser build: `fetch` must be captured as `fetch.bind(globalThis)`. Storing the
+bare global in a variable and calling it throws "Illegal invocation" in browsers while working
+fine in Node.
+
 ## The static build (`web/`)
 
 `web/` ships the frontend to GitHub Pages with no server behind it. It works by building

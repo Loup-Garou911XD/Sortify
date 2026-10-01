@@ -33,6 +33,9 @@ import {
   RequestError,
   validateGroups,
 } from "../../backend/src/server/validate.ts";
+import { DriveSnapshots } from "../../backend/src/sync/drive.ts";
+import { SyncEngine } from "../../backend/src/sync/engine.ts";
+import { syncView } from "../../backend/src/sync/view.ts";
 import { TagMapper } from "../../backend/src/tagging/mapper.ts";
 import { YouTubeClient } from "../../backend/src/youtube/client.ts";
 import { parsePlaylistId } from "../../backend/src/youtube/playlistUrl.ts";
@@ -56,10 +59,17 @@ export { RequestError as ApiError };
  * implementations of the cache cannot drift apart without the build failing.
  */
 let store: Cache | undefined;
+let sync: SyncEngine | undefined;
 const jobs = new JobRunner();
 
 export function boot(browserStore: BrowserStore): void {
   store = browserStore;
+  // Syncing needs a signed-in account; without one the page simply works on its own.
+  if (!isSignedIn()) return;
+  sync = new SyncEngine(browserStore, new DriveSnapshots({ getAccessToken }));
+  browserStore.onWrite = () => sync?.schedule();
+  void sync.sync();
+  addEventListener("pagehide", () => void sync?.flush());
 }
 
 function ready(): Cache {
@@ -146,6 +156,7 @@ const routes: [string, RegExp, Handler][] = [
       signedIn: isSignedIn(),
       sources: providerStatuses(getKeys()),
       dailyQuota: DAILY_QUOTA,
+      sync: sync ? syncView(sync.status()) : null,
     }),
   ],
   ["POST", /^\/api\/auth\/start$/, async () => ({ url: await startAuth() })],
@@ -163,6 +174,7 @@ const routes: [string, RegExp, Handler][] = [
     /^\/api\/auth\/signout$/,
     () => {
       signOut();
+      sync = undefined;
       return { ok: true };
     },
   ],

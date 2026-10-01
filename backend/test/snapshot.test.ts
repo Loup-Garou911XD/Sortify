@@ -234,6 +234,20 @@ describe("mergeSnapshots: runs", () => {
     assert.equal(merged.runs.find((r) => r.runId !== 1)?.groups[0]?.targetPlaylistId, "PLdone");
   });
 
+  it("does not duplicate a renumbered run on a later merge", () => {
+    // The remote run collides with a local one, so it is moved. Syncing the same remote again
+    // must recognise the copy already made rather than moving another one in beside it.
+    const local = snap({ runs: [run(1, { createdAt: "2026-01-01T00:00:00.000Z" })] });
+    const remote = snap({ runs: [run(1, { createdAt: "2026-02-02T00:00:00.000Z" })] });
+    const once = mergeSnapshots(local, remote);
+    assert.equal(once.merged.runs.length, 2);
+    const twice = mergeSnapshots(once.merged, remote);
+    assert.equal(twice.merged.runs.length, 2, "still two runs, not three");
+    assert.equal(twice.notes.renumbered.length, 0, "nothing moved the second time");
+    const thrice = mergeSnapshots(twice.merged, remote);
+    assert.equal(thrice.merged.runs.length, 2, "and it stays settled");
+  });
+
   it("is stable when a device merges the same remote twice", () => {
     const local = snap({ runs: [run(1)], tracks: [track("a")] });
     const remote = snap({ runs: [run(2, { createdAt: "2026-03-03T00:00:00.000Z" })] });

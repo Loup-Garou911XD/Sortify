@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { SyncView } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import type { Theme } from "../hooks.ts";
@@ -63,6 +64,31 @@ function SourceRow({
       )}
     </li>
   );
+}
+
+const SYNC_LABEL = {
+  idle: "Up to date",
+  syncing: "Syncing\u2026",
+  offline: "Not reachable",
+  "needs-auth": "Needs sign-in",
+} as const;
+
+/** What the Drive row says under its name: the problem if there is one, else what it does. */
+function syncHelp(sync: SyncView): string {
+  if (sync.message) return sync.message;
+  const notes: string[] = [];
+  if (sync.renamedRuns.length > 0) {
+    const moved = sync.renamedRuns.map((r) => `${r.from} \u2192 ${r.to}`).join(", ");
+    notes.push(`Plans renumbered to keep them apart from another device's: ${moved}.`);
+  }
+  if (sync.conflictedRuns.length > 0) {
+    notes.push(
+      `Plan ${sync.conflictedRuns.join(", ")} is part-created on two devices and was left alone; finish or delete it on one of them.`,
+    );
+  }
+  return notes.length > 0
+    ? notes.join(" ")
+    : "Playlists, tags and plans are kept in step across your devices.";
 }
 
 /** Each theme names the one the toggle moves to, so a single button reaches all three. */
@@ -195,6 +221,31 @@ export function TopBar({
                     <IconSignIn size={15} />
                     Connect YouTube
                   </MenuItem>
+                )}
+
+                {status.sync && (
+                  <>
+                    <div className="menu-sep" />
+                    <div className="menu-label menu-label-row">
+                      <span className="eyebrow">Sync</span>
+                      <span className="menu-count">{SYNC_LABEL[status.sync.state]}</span>
+                    </div>
+                    <ul className="source-list">
+                      <SourceRow
+                        on={status.sync.state === "idle"}
+                        name="Google Drive"
+                        help={syncHelp(status.sync)}
+                        onClick={
+                          status.sync.state === "needs-auth"
+                            ? () => {
+                                close();
+                                openSignIn();
+                              }
+                            : undefined
+                        }
+                      />
+                    </ul>
+                  </>
                 )}
 
                 <div className="menu-sep" />

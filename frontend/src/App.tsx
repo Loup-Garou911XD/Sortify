@@ -102,6 +102,27 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
   // Keep progress numbers in the sidebar moving while a task runs.
   useInterval(refresh, 4000, job?.status === "running");
 
+  // A sync can bring in work from another device while this page sits open. Poll for that
+  // narrowly and refresh only when something actually arrived: a blanket refresh would rebuild
+  // the sort preview and throw away a half-edited plan.
+  // Only a merge that brought something in is recorded, so the first one seen after this page
+  // loaded still triggers a refresh even if it landed before the first status read.
+  const mergedAt = useRef<string | null>(null);
+  const checkSync = useCallback(async () => {
+    const current = await api<StatusResponse>("/api/status").catch(() => null);
+    if (!current?.sync?.changed || current.sync.at === mergedAt.current) return;
+    mergedAt.current = current.sync.at;
+    refresh();
+  }, [refresh]);
+  useEffect(() => {
+    void checkSync();
+  }, [checkSync]);
+  useInterval(
+    () => void checkSync(),
+    5000,
+    Boolean(status.data?.sync) && job?.status !== "running",
+  );
+
   // Close the mobile drawer whenever the route changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the route is the trigger
   useEffect(() => setDrawerOpen(false), [path]);

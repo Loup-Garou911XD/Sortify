@@ -74,7 +74,9 @@ export class YouTubeClient {
     options: { fetch?: FetchLike; sleep?: (ms: number) => Promise<void> } = {},
   ) {
     this.tokens = tokens;
-    this.fetchImpl = options.fetch ?? fetch;
+    // `fetch` is a method of the global object: capturing it unbound and calling it through a
+    // variable throws "Illegal invocation" in browsers, though it works in Node.
+    this.fetchImpl = options.fetch ?? fetch.bind(globalThis);
     this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 

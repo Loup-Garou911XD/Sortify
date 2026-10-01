@@ -21,6 +21,8 @@ import { enrichPlaylist } from "../enrich/pipeline.ts";
 import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
 import { createEnrichers, fetchPlaylist, type PlaylistReader } from "../services.ts";
+import type { SyncEngine } from "../sync/engine.ts";
+import { syncView } from "../sync/view.ts";
 import {
   authState,
   beginWebAuth,
@@ -45,6 +47,8 @@ export type YouTubeApi = PlaylistReader & PlaylistWriter;
 export interface AppDeps {
   config: Config;
   store: Store;
+  /** Absent when the user is not signed in, or on a build that does not sync. */
+  sync?: SyncEngine | undefined;
   /** Built lazily per task so a sign-in done in the UI takes effect without a restart. */
   youtube: () => YouTubeApi;
   /** Directory with the built web UI (index.html + assets). */
@@ -104,7 +108,7 @@ function isLocalHost(hostname: string): boolean {
 }
 
 export function createApp(deps: AppDeps) {
-  const { config, store } = deps;
+  const { config, store, sync } = deps;
   const auth = deps.auth ?? {
     begin: beginWebAuth,
     finish: finishWebAuth,
@@ -161,9 +165,16 @@ export function createApp(deps: AppDeps) {
     }
   };
 
-  const startJob: JobRunner["start"] = (...args) => {
+  const startJob: JobRunner["start"] = (kind, label, target, task) => {
     try {
-      return jobs.start(...args);
+      // Every long task ends with the cache changed, so ask for a push once it settles.
+      return jobs.start(kind, label, target, async (ctx) => {
+        try {
+          return await task(ctx);
+        } finally {
+          sync?.schedule();
+        }
+      });
     } catch (err) {
       if (err instanceof JobBusyError) throw new HttpError(409, err.message);
       throw err;
@@ -183,6 +194,7 @@ export function createApp(deps: AppDeps) {
           ...state,
           sources: providerStatuses(config.env),
           dailyQuota: config.dailyQuota,
+          sync: sync ? syncView(sync.status()) : null,
         };
       },
     ],
@@ -331,7 +343,9 @@ export function createApp(deps: AppDeps) {
         const minSize = optionalPositiveInt(req.minSize, "minSize") ?? 1;
         const allowed = new Set(store.playlistTracks(id).map((t) => t.videoId));
         const groups = validateGroups(req.groups, allowed);
-        return { runId: store.createRun(id, dimension, minSize, groups) };
+        const runId = store.createRun(id, dimension, minSize, groups);
+        sync?.schedule();
+        return { runId };
       },
     ],
     ["GET", /^\/api\/runs$/, () => store.listRuns().map(runSummary)],
@@ -364,6 +378,7 @@ export function createApp(deps: AppDeps) {
           throw new HttpError(409, "This run is being applied");
         }
         store.deleteRun(run.runId);
+        sync?.schedule();
         return { ok: true };
       },
     ],

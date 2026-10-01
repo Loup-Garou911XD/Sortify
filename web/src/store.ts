@@ -175,6 +175,8 @@ export class BrowserStore implements Syncable {
   private seq = { run: 0, group: 0 };
 
   /** Keys written since the last flush, per store; a key absent from the model is deleted. */
+  /** Called after a write settles, so the owner can ask for a sync. */
+  onWrite: (() => void) | undefined;
   private readonly dirty = new Map<StoreName, Set<string>>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private inTx = false;
@@ -262,7 +264,9 @@ export class BrowserStore implements Syncable {
   }
 
   private schedule(): void {
-    if (this.inTx || this.timer !== undefined) return;
+    if (this.inTx) return;
+    this.onWrite?.();
+    if (this.timer !== undefined) return;
     this.timer = setTimeout(() => this.flush(), FLUSH_MS);
   }
 
@@ -716,7 +720,10 @@ export class BrowserStore implements Syncable {
       }
     }
     this.seq = merged.seq;
+    const notify = this.onWrite;
+    this.onWrite = undefined;
     this.touchRuns();
+    this.onWrite = notify;
     // A merge is rare and the result must survive a close, so do not wait for the debounce.
     this.flush();
     return notes;

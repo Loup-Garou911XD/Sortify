@@ -152,7 +152,9 @@ export class ServiceClient {
     key: string,
     request: LookupRequest<T>,
   ): Promise<T> {
-    const fetchImpl = this.deps.fetch ?? fetch;
+    // `fetch` is a method of the global object: capturing it unbound and calling it through a
+    // variable throws "Illegal invocation" in browsers, though it works in Node.
+    const fetchImpl = this.deps.fetch ?? fetch.bind(globalThis);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       this.deps.budget.take();
       await this.limiter.wait();

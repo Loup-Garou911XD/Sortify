@@ -9,6 +9,7 @@
  * Consent opens in a second tab. That tab lands back here with `?code=`, completes the exchange
  * and closes; the first tab notices because tokens live in localStorage, which both tabs share.
  */
+import { DRIVE_SCOPE } from "../../backend/src/sync/drive.ts";
 import { getKey, hasGoogleClient } from "./settings.ts";
 
 /**
@@ -16,7 +17,7 @@ import { getKey, hasGoogleClient } from "./settings.ts";
  * asks for. Copied rather than imported: `backend/src/youtube/auth.ts` is the Node loopback flow
  * and pulls in `node:` modules and google-auth-library.
  */
-const SCOPES = ["https://www.googleapis.com/auth/youtube"];
+const SCOPES = ["https://www.googleapis.com/auth/youtube", DRIVE_SCOPE];
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";

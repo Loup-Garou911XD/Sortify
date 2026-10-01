@@ -36,7 +36,9 @@ export class Spotify implements ProviderClient {
   private tokenRequest: Promise<string> | undefined;
 
   constructor(deps: LookupDeps, clientId: string, clientSecret: string) {
-    this.fetchImpl = deps.fetch ?? fetch;
+    // `fetch` is a method of the global object: capturing it unbound and calling it through a
+    // variable throws "Illegal invocation" in browsers, though it works in Node.
+    this.fetchImpl = deps.fetch ?? fetch.bind(globalThis);
     // btoa, not Buffer: this module also runs in the browser build, and both are ASCII.
     this.credentials = btoa(`${clientId}:${clientSecret}`);
     this.http = new ServiceClient(deps, {

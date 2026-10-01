@@ -7,9 +7,14 @@ import { createInterface } from "node:readline";
 import { type Credentials, OAuth2Client } from "google-auth-library";
 import type { StatusResponse } from "../api/types.ts";
 import type { ClientSecretsSource, Config } from "../config.ts";
+import { DRIVE_SCOPE } from "../sync/drive.ts";
 
-/** Read access to playlists plus the right to create playlists and add items. */
-export const SCOPES = ["https://www.googleapis.com/auth/youtube"];
+/**
+ * Read access to playlists plus the right to create playlists and add items, and a hidden
+ * folder of Sortify's own in Drive for syncing between devices. Adding a scope invalidates
+ * stored consent, so a sign-in made before it was added has to be repeated.
+ */
+export const SCOPES = ["https://www.googleapis.com/auth/youtube", DRIVE_SCOPE];
 
 interface ClientSecrets {
   clientId: string;

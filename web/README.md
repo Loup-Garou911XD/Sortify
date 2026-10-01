@@ -49,6 +49,17 @@ passes nothing and its rows stay plain text, exactly as before.
    iTunes and YouTube topics need no key and say so.
 4. **Connect YouTube**, then use it exactly as you would locally.
 
+## Syncing between devices
+
+Signed in, the app keeps one dataset in a hidden folder of your own Google Drive
+(`appDataFolder`), so the same playlists, tags and plans show up on every browser you sign into —
+and in `sortify ui` on your machine, which syncs the same file. Connections → Sync shows how the
+last attempt went.
+
+Nothing is shared with anyone: the folder is per-app and per-user, invisible in your Drive, and
+no other app can read it. The one visible cost is that granting it changes what the app asks for,
+so you reconnect YouTube once.
+
 ## What you are trading away
 
 - **Your keys sit in this browser's localStorage,** including the Google client secret. Anything
@@ -57,10 +68,12 @@ passes nothing and its rows stay plain text, exactly as before.
   instead, which is why it remains the safer option.
 - **Google expires refresh tokens after 7 days** while the OAuth app is in testing mode, so
   expect to reconnect about weekly.
+- **Syncing needs the `drive.appdata` permission.** A sign-in made before syncing existed does
+  not carry it, so the first thing it will say is that it needs you to sign in again.
 - **Browsers forbid setting `User-Agent`.** MusicBrainz and Discogs both ask API clients to send
   a descriptive one; a static page cannot, and sends the browser's own instead.
-- **The cache is per-browser.** Clearing site data clears your playlists and the lookup cache.
-  Nothing is lost on YouTube, but tagging has to run again.
+- **Clearing site data clears this browser's copy.** With syncing on it comes back from Drive on
+  the next sign-in; without it, tagging has to run again.
 - The sign-in dialog still describes the local setup: it mentions `SORTIFY_CLIENT_SECRETS` and
   restarting `sortify ui`. Use Connections → YouTube instead. The tag sources panel no longer has
   that problem — it adapts when the shell can edit its own keys.
