@@ -241,6 +241,19 @@ const routes: [string, RegExp, Handler][] = [
     },
   ],
   [
+    "DELETE",
+    /^\/api\/playlists\/([\w-]+)$/,
+    ([id = ""]) => {
+      const playlist = requirePlaylist(id);
+      const current = jobs.current();
+      if (current?.status === "running" && current.playlistId === id) {
+        throw new RequestError(409, "This playlist is busy");
+      }
+      ready().deletePlaylist(playlist.playlistId);
+      return { ok: true };
+    },
+  ],
+  [
     "POST",
     /^\/api\/playlists\/([\w-]+)\/enrich$/,
     ([id = ""], body) => {

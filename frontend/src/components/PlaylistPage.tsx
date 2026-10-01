@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { PlaylistDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
+import { api } from "../api.ts";
 import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
-import { IconExternal, IconRefresh, IconTag } from "./icons.tsx";
+import { IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
 import { Button, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
@@ -10,9 +11,10 @@ import { Button, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
 type Tab = "sort" | "tracks";
 
 export function PlaylistPage({ playlistId }: { playlistId: string }) {
-  const { version, job, status, startJob } = useApp();
+  const { version, job, status, startJob, navigate, refresh, notify, runs } = useApp();
   const detail = useResource<PlaylistDetail>(`/api/playlists/${playlistId}`, version);
   const [tab, setTab] = useState<Tab>("sort");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string>();
   const busy = job?.status === "running";
   const running = busy && job?.playlistId === playlistId ? job : null;
@@ -28,6 +30,21 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const { playlist, tracks } = detail.data;
   const untagged = playlist.total - playlist.enriched;
   const missingSources = status?.sources.filter((s) => !s.configured) ?? [];
+
+  const plans = runs.filter((r) => r.sourcePlaylistId === playlistId);
+
+  const remove = async () => {
+    setError(undefined);
+    try {
+      await api(`/api/playlists/${playlistId}`, { method: "DELETE" });
+      notify("good", `Removed "${playlist.title}".`);
+      refresh();
+      navigate("/");
+    } catch (err) {
+      setConfirmDelete(false);
+      setError((err as Error).message);
+    }
+  };
 
   const run = async (path: string, body: unknown = {}) => {
     setError(undefined);
@@ -60,6 +77,31 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           </p>
         </div>
         <div className="page-actions">
+          {confirmDelete ? (
+            <>
+              <span className="muted small" style={{ maxWidth: "52ch" }}>
+                Forget this playlist and its {plural(playlist.total, "track")}
+                {plans.length > 0 && `, along with ${plural(plans.length, "plan")} made from it`}?
+                Playlists already created on YouTube stay.
+              </span>
+              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
+                Keep
+              </Button>
+              <Button variant="danger" onClick={remove}>
+                Delete
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              disabled={busy}
+              title={busy ? "Wait for the current task to finish" : undefined}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <IconTrash />
+              Delete
+            </Button>
+          )}
           <Button
             variant="ghost"
             disabled={busy || !status?.signedIn}

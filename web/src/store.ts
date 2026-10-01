@@ -28,8 +28,11 @@ import {
 } from "../../backend/src/sync/snapshot.ts";
 
 const DB_NAME = "sortify";
-/** 2 split the single blob-per-collection store into one record per track, tag and lookup. */
-const DB_VERSION = 2;
+/**
+ * 2 split the single blob-per-collection store into one record per track, tag and lookup.
+ * 3 added `deleted`, the tombstones that stop a sync resurrecting a deleted playlist.
+ */
+const DB_VERSION = 3;
 /** The v1 store: one record per collection. Read once on upgrade, then dropped. */
 const LEGACY = "records";
 const FLUSH_MS = 600;
@@ -43,7 +46,7 @@ const SEP = "\x00";
  * run list, its groups and the id counters are small and always change together, so they stay
  * one record under RUNS_KEY.
  */
-const STORES = ["playlists", "tracks", "tags", "cache", "runs", "items"] as const;
+const STORES = ["playlists", "tracks", "tags", "cache", "runs", "items", "deleted"] as const;
 type StoreName = (typeof STORES)[number];
 const RUNS_KEY = "state";
 
@@ -169,6 +172,8 @@ export class BrowserStore implements Syncable {
   private readonly tracks = new Map<string, TrackRow>();
   private readonly tags = new Map<string, Tag[]>();
   private readonly cache = new Map<string, unknown>();
+  /** playlistId -> when it was deleted here. */
+  private readonly deleted = new Map<string, string>();
   private runs: Run[] = [];
   private groups: RunGroup[] = [];
   private readonly items = new Map<number, RunItem[]>();
@@ -226,19 +231,21 @@ export class BrowserStore implements Syncable {
       ]);
       return keys.map((k, i) => [String(k), values[i] as V]);
     };
-    const [playlists, tracks, tags, cache, runs, items] = await Promise.all([
+    const [playlists, tracks, tags, cache, runs, items, deleted] = await Promise.all([
       entries<PlaylistRow>("playlists"),
       entries<TrackRow>("tracks"),
       entries<Tag[]>("tags"),
       entries<unknown>("cache"),
       entries<RunHeader>("runs"),
       entries<RunItem[]>("items"),
+      entries<string>("deleted"),
     ]);
     for (const [k, v] of playlists) this.playlists.set(k, v);
     for (const [k, v] of tracks) this.tracks.set(k, v);
     for (const [k, v] of tags) this.tags.set(k, v);
     for (const [k, v] of cache) this.cache.set(k, v);
     for (const [k, v] of items) this.items.set(Number(k), v);
+    for (const [k, v] of deleted) this.deleted.set(k, v);
     const header = runs.find(([k]) => k === RUNS_KEY)?.[1];
     if (header) {
       this.runs = header.runs;
@@ -304,6 +311,8 @@ export class BrowserStore implements Syncable {
         return this.cache.get(key);
       case "items":
         return this.items.get(Number(key));
+      case "deleted":
+        return this.deleted.get(key);
       default:
         return { runs: this.runs, groups: this.groups, seq: this.seq };
     }
@@ -367,6 +376,9 @@ export class BrowserStore implements Syncable {
         fetchedAt: now(),
         items: items.map((i) => i.videoId),
       });
+      // Re-adding clears the tombstone: the fetch is the later intent.
+      this.deleted.delete(playlistId);
+      this.touch("deleted", playlistId);
       for (const item of items) {
         const existing = this.tracks.get(item.videoId);
         // Title and channel are refreshed; anything already learned about the track is kept.
@@ -560,6 +572,36 @@ export class BrowserStore implements Syncable {
     this.touchRuns();
   }
 
+  /**
+   * Forgets a playlist: its membership, any plans made from it, and the tracks it was the last
+   * one holding, along with their tags. Tracks shared with another playlist stay, and so does
+   * the lookup cache, which is keyed by artist and title and stays useful.
+   */
+  deletePlaylist(playlistId: string): void {
+    this.tx(() => {
+      for (const run of this.runs.filter((r) => r.sourcePlaylistId === playlistId)) {
+        this.deleteRun(run.runId);
+      }
+      const members = this.playlists.get(playlistId)?.items ?? [];
+      this.playlists.delete(playlistId);
+      this.touch("playlists", playlistId);
+      // Remembered so syncing does not hand it back from a device that still has it.
+      this.deleted.set(playlistId, now());
+      this.touch("deleted", playlistId);
+
+      const stillUsed = new Set<string>();
+      for (const row of this.playlists.values())
+        for (const videoId of row.items) stillUsed.add(videoId);
+      for (const videoId of members) {
+        if (stillUsed.has(videoId)) continue;
+        this.tracks.delete(videoId);
+        this.tags.delete(videoId);
+        this.touch("tracks", videoId);
+        this.touch("tags", videoId);
+      }
+    });
+  }
+
   deleteRun(runId: number): void {
     this.tx(() => {
       for (const g of this.groups) {
@@ -654,6 +696,7 @@ export class BrowserStore implements Syncable {
         const at = id.indexOf(SEP);
         return { source: id.slice(0, at), key: id.slice(at + 1), body };
       }),
+      deleted: [...this.deleted].map(([playlistId, at]) => ({ playlistId, at })),
       runs: this.runs.map((run) => ({
         ...run,
         groups: this.runGroups(run.runId).map((g) => ({
@@ -692,6 +735,8 @@ export class BrowserStore implements Syncable {
     this.tags.clear();
     this.cache.clear();
     this.items.clear();
+    for (const playlistId of this.deleted.keys()) this.touch("deleted", playlistId);
+    this.deleted.clear();
 
     for (const p of merged.playlists) {
       this.playlists.set(p.playlistId, {
@@ -731,6 +776,10 @@ export class BrowserStore implements Syncable {
         );
         this.touch("items", g.groupId);
       }
+    }
+    for (const t of merged.deleted) {
+      this.deleted.set(t.playlistId, t.at);
+      this.touch("deleted", t.playlistId);
     }
     this.seq = merged.seq;
     this.touchRuns();

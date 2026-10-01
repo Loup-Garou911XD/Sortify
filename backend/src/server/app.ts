@@ -286,6 +286,21 @@ export function createApp(deps: AppDeps) {
       },
     ],
     [
+      "DELETE",
+      /^\/api\/playlists\/([\w-]+)$/,
+      ([id = ""]) => {
+        const playlist = requirePlaylist(id);
+        // A running job writes to this playlist as it goes; deleting underneath it would leave
+        // the job saving rows for something that no longer exists.
+        if (jobs.current()?.status === "running" && jobs.current()?.playlistId === id) {
+          throw new HttpError(409, "This playlist is busy");
+        }
+        store.deletePlaylist(playlist.playlistId);
+        sync?.schedule();
+        return { ok: true };
+      },
+    ],
+    [
       "POST",
       /^\/api\/playlists\/([\w-]+)\/enrich$/,
       async ([id = ""], body) => {

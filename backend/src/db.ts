@@ -120,6 +120,11 @@ CREATE TABLE IF NOT EXISTS track_tags (
   weight    REAL NOT NULL,
   PRIMARY KEY (video_id, dimension, value, source)
 );
+CREATE TABLE IF NOT EXISTS deleted_playlists (
+  playlist_id TEXT PRIMARY KEY,
+  deleted_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lookup_cache (
   source     TEXT NOT NULL,
   key        TEXT NOT NULL,
@@ -195,6 +200,7 @@ interface TrackRow {
 export class Store implements Syncable {
   readonly db: DatabaseSync;
   private readonly statements = new Map<string, StatementSync>();
+  private inTx = false;
 
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
@@ -245,8 +251,15 @@ export class Store implements Syncable {
     this.db.close();
   }
 
+  /**
+   * Runs `fn` as one unit. Nesting joins the outer transaction rather than starting a second
+   * one, which SQLite does not allow — so a method that already writes atomically can be reused
+   * inside another. The browser store behaves the same way.
+   */
   tx<T>(fn: () => T): T {
+    if (this.inTx) return fn();
     this.db.exec("BEGIN");
+    this.inTx = true;
     try {
       const result = fn();
       this.db.exec("COMMIT");
@@ -254,6 +267,8 @@ export class Store implements Syncable {
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
+    } finally {
+      this.inTx = false;
     }
   }
 
@@ -269,6 +284,7 @@ export class Store implements Syncable {
         `INSERT INTO playlists (playlist_id, title, fetched_at) VALUES (?, ?, ?)
            ON CONFLICT (playlist_id) DO UPDATE SET title = excluded.title, fetched_at = excluded.fetched_at`,
       ).run(playlistId, title, now());
+      this.prep("DELETE FROM deleted_playlists WHERE playlist_id = ?").run(playlistId);
       this.prep("DELETE FROM playlist_items WHERE playlist_id = ?").run(playlistId);
       const upsertTrack = this.prep(
         `INSERT INTO tracks (video_id, title, channel) VALUES (?, ?, ?)
@@ -509,6 +525,31 @@ export class Store implements Syncable {
   }
 
   /** Removes a run and its groups from the cache; playlists it created on YouTube are left alone. */
+  /**
+   * Forgets a playlist: its membership, any plans made from it, and the tracks it was the last
+   * one holding, along with their tags. Tracks shared with another playlist stay, and so does
+   * the provider lookup cache, which is keyed by artist and title and stays useful. Playlists
+   * already created on YouTube are untouched.
+   */
+  deletePlaylist(playlistId: string): void {
+    this.tx(() => {
+      for (const run of this.listRuns()) {
+        if (run.sourcePlaylistId === playlistId) this.deleteRun(run.runId);
+      }
+      this.prep("DELETE FROM playlist_items WHERE playlist_id = ?").run(playlistId);
+      this.prep("DELETE FROM playlists WHERE playlist_id = ?").run(playlistId);
+      // Remembered so syncing does not hand the playlist back from a device that still has it.
+      this.prep(
+        `INSERT INTO deleted_playlists (playlist_id, deleted_at) VALUES (?, ?)
+           ON CONFLICT (playlist_id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      ).run(playlistId, now());
+      const orphans =
+        "SELECT video_id FROM tracks WHERE video_id NOT IN (SELECT video_id FROM playlist_items)";
+      this.prep(`DELETE FROM track_tags WHERE video_id IN (${orphans})`).run();
+      this.prep(`DELETE FROM tracks WHERE video_id IN (${orphans})`).run();
+    });
+  }
+
   deleteRun(runId: number): void {
     this.tx(() => {
       this.prep(
@@ -590,6 +631,9 @@ export class Store implements Syncable {
       cache: rows<{ source: string; key: string; body: string }>(
         "SELECT source, key, body FROM lookup_cache",
       ).map((c) => ({ source: c.source, key: c.key, body: JSON.parse(c.body) as unknown })),
+      deleted: rows<{ playlistId: string; at: string }>(
+        "SELECT playlist_id AS playlistId, deleted_at AS at FROM deleted_playlists",
+      ),
       runs: this.listRuns().map((run) => ({
         ...run,
         groups: (groups.get(run.runId) ?? []).map((g) => ({
@@ -616,6 +660,7 @@ export class Store implements Syncable {
         "tracks",
         "playlists",
         "lookup_cache",
+        "deleted_playlists",
       ]) {
         this.prep(`DELETE FROM ${table}`).run();
       }
@@ -664,6 +709,10 @@ export class Store implements Syncable {
       for (const c of merged.cache) {
         cache.run(c.source, c.key, JSON.stringify(c.body), merged.updatedAt);
       }
+      const grave = this.prep(
+        "INSERT INTO deleted_playlists (playlist_id, deleted_at) VALUES (?, ?)",
+      );
+      for (const t of merged.deleted) grave.run(t.playlistId, t.at);
       const run = this.prep(
         `INSERT INTO runs (run_id, source_playlist_id, dimension, min_size, created_at, status,
            quota_used, writes_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

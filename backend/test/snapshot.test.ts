@@ -131,6 +131,132 @@ describe("mergeSnapshots", () => {
   });
 });
 
+describe("mergeSnapshots: older snapshots", () => {
+  it("merges one written before a field existed", () => {
+    // Exactly what a Drive file from the previous release looks like: no `deleted`, no `seq`.
+    const old = {
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      playlists: [{ playlistId: "A", title: "Old", fetchedAt: "2026-01-01", videoIds: ["x"] }],
+      tracks: [track("x")],
+      tags: [],
+      cache: [],
+      runs: [],
+    } as unknown as Snapshot;
+    const { merged } = mergeSnapshots(snap(), old);
+    assert.equal(merged.playlists.length, 1, "it still merges");
+    assert.deepEqual(merged.deleted, [], "and the missing field becomes empty");
+  });
+
+  it("survives a snapshot that is empty, null or nonsense", () => {
+    for (const bad of [null, undefined, {}, [], "nope", 7]) {
+      const { merged } = mergeSnapshots(snap({ tracks: [track("a")] }), bad as unknown as Snapshot);
+      assert.equal(merged.tracks.length, 1, `local data kept for ${JSON.stringify(bad)}`);
+    }
+  });
+
+  it("fills in a run that arrived without its groups", () => {
+    const old = {
+      runs: [{ runId: 1, sourcePlaylistId: "A", createdAt: "x" }],
+    } as unknown as Snapshot;
+    const { merged } = mergeSnapshots(snap(), old);
+    assert.deepEqual(merged.runs[0]?.groups, [], "rather than throwing on a missing array");
+  });
+});
+
+describe("mergeSnapshots: deletions", () => {
+  // Relative to now, because tombstones expire after 90 days.
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const list = (id: string, fetchedAt: string, videoIds: string[]) => ({
+    playlistId: id,
+    title: `List ${id}`,
+    fetchedAt,
+    videoIds,
+  });
+
+  it("does not let a device that still has the playlist resurrect it", () => {
+    // The whole point: A deletes, B has not synced since, and a plain union would add it back.
+    const deletedHere = snap({ deleted: [{ playlistId: "A", at: ago(10) }] });
+    const stillHasIt = snap({
+      playlists: [list("A", ago(60), ["x"])],
+      tracks: [track("x")],
+      tags: [{ videoId: "x", tags: [tag("Pop")] }],
+    });
+    const { merged } = mergeSnapshots(deletedHere, stillHasIt);
+    assert.deepEqual(merged.playlists, [], "the playlist stays deleted");
+    assert.deepEqual(merged.tracks, [], "and its tracks go with it");
+    assert.deepEqual(merged.tags, []);
+    assert.equal(merged.deleted.length, 1, "the tombstone is kept so other devices learn of it");
+  });
+
+  it("carries the deletion to the device that still had it", () => {
+    const stillHasIt = snap({
+      playlists: [list("A", ago(60), ["x"])],
+      tracks: [track("x")],
+    });
+    const deletedElsewhere = snap({
+      deleted: [{ playlistId: "A", at: ago(10) }],
+    });
+    const { merged, notes } = mergeSnapshots(stillHasIt, deletedElsewhere);
+    assert.deepEqual(merged.playlists, []);
+    assert.equal(notes.removed.playlists, 1, "and it is reported, so open pages refresh");
+    assert.equal(notes.removed.tracks, 1);
+    assert.equal(isQuiet(notes), false);
+  });
+
+  it("keeps a playlist that was added again after being deleted", () => {
+    const readded = snap({
+      playlists: [list("A", ago(1), ["x"])],
+      tracks: [track("x")],
+    });
+    const oldDelete = snap({ deleted: [{ playlistId: "A", at: ago(10) }] });
+    const { merged } = mergeSnapshots(readded, oldDelete);
+    assert.equal(merged.playlists.length, 1, "re-adding is the later intent");
+    assert.deepEqual(merged.deleted, [], "and the tombstone is spent");
+  });
+
+  it("keeps a track another playlist still holds", () => {
+    const deletedHere = snap({
+      playlists: [list("B", ago(60), ["shared"])],
+      tracks: [track("shared")],
+      deleted: [{ playlistId: "A", at: ago(10) }],
+    });
+    const stillHasIt = snap({
+      playlists: [list("A", ago(60), ["shared", "onlyA"])],
+      tracks: [track("shared"), track("onlyA")],
+    });
+    const { merged } = mergeSnapshots(deletedHere, stillHasIt);
+    assert.deepEqual(
+      merged.tracks.map((t) => t.videoId),
+      ["shared"],
+      "the shared track survives, the orphan does not",
+    );
+  });
+
+  it("takes the plans made from a deleted playlist", () => {
+    const deletedHere = snap({ deleted: [{ playlistId: "PL1", at: ago(10) }] });
+    const stillHasIt = snap({
+      playlists: [list("PL1", ago(60), ["a"])],
+      tracks: [track("a")],
+      runs: [run(1)],
+    });
+    const { merged } = mergeSnapshots(deletedHere, stillHasIt);
+    assert.deepEqual(merged.runs, [], "a plan whose playlist is gone goes too");
+  });
+
+  it("settles after one round rather than flapping", () => {
+    const a = snap({ deleted: [{ playlistId: "A", at: ago(10) }] });
+    const b = snap({
+      playlists: [list("A", ago(60), ["x"])],
+      tracks: [track("x")],
+    });
+    const first = mergeSnapshots(a, b).merged;
+    const second = mergeSnapshots(first, b);
+    assert.deepEqual(second.merged.playlists, [], "a stale remote cannot bring it back later");
+    assert.equal(second.notes.removed.playlists, 0, "and there is nothing new to report");
+  });
+});
+
 describe("mergeSnapshots: runs", () => {
   it("combines progress when both sides hold the same run", () => {
     const base = run(1, { status: "paused" });
