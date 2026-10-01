@@ -733,6 +733,19 @@ li:hover > .row-btn,
 .source-row .dot {
   margin-top: 6px;
 }
+/* A row is a button when the shell can configure the source; the local app renders a div. */
+.source-row-button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--fast);
+}
+.source-row-button:hover {
+  background: var(--panel-2);
+}
 .source-name {
   font-size: 13px;
   font-weight: 550;

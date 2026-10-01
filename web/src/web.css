@@ -34,23 +34,6 @@
   color: var(--ink-2);
 }
 
-/*
- * Only the static build makes the Connections rows interactive, so the button reset lives here
- * rather than in the shared stylesheet.
- */
-.source-row-button {
-  border: 0;
-  background: transparent;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--fast);
-}
-.source-row-button:hover {
-  background: var(--panel-2);
-}
-
 /* The service link follows the steps; give it room so it does not read as another step. */
 .key-dialog .steps + .hint {
   margin-top: 12px;
@@ -70,35 +53,13 @@
   resize: vertical;
 }
 
-.key-dialog input[type="file"] {
-  font-size: 12.5px;
-  color: var(--ink-2);
-}
-
-/* The native picker button is the one control the shared button styles cannot reach. */
-.key-dialog input[type="file"]::file-selector-button {
-  height: 32px;
-  margin-right: 10px;
-  padding: 0 12px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-1);
-  background: var(--panel);
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 550;
-  cursor: pointer;
-  transition:
-    background var(--fast),
-    border-color var(--fast);
-}
-.key-dialog input[type="file"]::file-selector-button:hover {
-  background: var(--panel-2);
-  border-color: var(--ink-3);
-}
-
 .import-summary {
   display: grid;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* A label wearing the shared button style, with the real input visually hidden inside it. */
+.file-button {
+  width: fit-content;
 }

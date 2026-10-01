@@ -6,14 +6,10 @@
  * JSON shapes, but the work happens here using the very same domain code the server calls
  * (`enrichPlaylist`, `planGroups`, `applyRun`, the provider registry).
  */
-import "./shims.ts";
-
 import type {
   ApplyRequest,
   CreateRunRequest,
-  Dimension,
   EnrichRequest,
-  GroupDraft,
   JobView,
   PlaylistDetail,
   PreviewRequest,
@@ -24,56 +20,55 @@ import type {
   TrackView,
 } from "../../backend/src/api/types.ts";
 import { applyRun, type Privacy } from "../../backend/src/apply.ts";
-import type { Run, Store } from "../../backend/src/db.ts";
+import type { Cache, Run } from "../../backend/src/db.ts";
 import { Budget, type LookupDeps } from "../../backend/src/enrich/lookup.ts";
 import { type Enrichers, enrichPlaylist } from "../../backend/src/enrich/pipeline.ts";
 import { createProviderClients, providerStatuses } from "../../backend/src/enrich/providers.ts";
 import { planGroups } from "../../backend/src/planner.ts";
-import { JobRunner } from "../../backend/src/server/jobs.ts";
+import { JobBusyError, JobRunner } from "../../backend/src/server/jobs.ts";
+import {
+  asObject,
+  dimensionOf,
+  optionalPositiveInt,
+  RequestError,
+  validateGroups,
+} from "../../backend/src/server/validate.ts";
 import { TagMapper } from "../../backend/src/tagging/mapper.ts";
 import { YouTubeClient } from "../../backend/src/youtube/client.ts";
 import { parsePlaylistId } from "../../backend/src/youtube/playlistUrl.ts";
 import { watchLinks } from "../../backend/src/youtube/watchLinks.ts";
+import type * as httpApi from "../../frontend/src/api.ts";
 import { completeAuth, getAccessToken, isSignedIn, signOut, startAuth } from "./auth.ts";
-import { envVars, hasGoogleClient } from "./settings.ts";
+import { getKeys, hasGoogleClient } from "./settings.ts";
 import type { BrowserStore } from "./store.ts";
 
 const VERSION = "0.1.0";
 const DAILY_QUOTA = 10_000;
-const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
-const MAX_GROUPS = 200;
-const MAX_NAME = 150;
-
-export class ApiError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
 
 /**
- * The browser store carries every method the pipeline calls, but `Store` is a class with private
- * SQLite fields, so it cannot be implemented structurally. This is the single cast that bridges
- * the two, and the only place the web app claims anything about the backend's internals.
+ * What a rejected request looks like to the UI. It is the server's `RequestError` under the name
+ * `frontend/src/api.ts` exports, because this module stands in for that one.
  */
-let store: Store;
+export { RequestError as ApiError };
+
+/**
+ * `BrowserStore` is checked against `Cache` — `Store` without its SQLite handle — so the two
+ * implementations of the cache cannot drift apart without the build failing.
+ */
+let store: Cache | undefined;
 const jobs = new JobRunner();
-/** Set once `boot` has run; every route goes through `ready()` so nothing races the load. */
-let booted = false;
 
 export function boot(browserStore: BrowserStore): void {
-  store = browserStore as unknown as Store;
-  booted = true;
+  store = browserStore;
 }
 
-function ready(): Store {
-  if (!booted) throw new ApiError(503, "Still starting up. Try again in a moment.");
+function ready(): Cache {
+  if (!store) throw new RequestError(503, "Still starting up. Try again in a moment.");
   return store;
 }
 
 function youtube(): YouTubeClient {
-  if (!isSignedIn()) throw new ApiError(401, "Connect YouTube first.");
+  if (!isSignedIn()) throw new RequestError(401, "Connect YouTube first.");
   return new YouTubeClient({ getAccessToken });
 }
 
@@ -89,69 +84,21 @@ function enrichers(maxApiCalls?: number): { enrichers: Enrichers; budget: Budget
   };
   return {
     budget,
-    enrichers: { mapper: new TagMapper(), clients: createProviderClients(deps, envVars()) },
+    enrichers: { mapper: new TagMapper(), clients: createProviderClients(deps, getKeys()) },
   };
-}
-
-// --- request helpers, mirroring backend/src/server/app.ts ---------------------------
-
-const asObject = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-
-function optionalPositiveInt(value: unknown, name: string): number | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw new ApiError(400, `${name} must be a positive integer`);
-  }
-  return value;
-}
-
-function dimensionOf(value: unknown): Dimension {
-  if (typeof value !== "string" || !(DIMENSIONS as readonly string[]).includes(value)) {
-    throw new ApiError(400, `dimension must be one of ${DIMENSIONS.join(", ")}`);
-  }
-  return value as Dimension;
-}
-
-/** Known videos only, unique non-empty names, no duplicates inside a group; empties dropped. */
-function validateGroups(raw: unknown, allowed: Set<string>): GroupDraft[] {
-  if (!Array.isArray(raw)) throw new ApiError(400, "groups must be an array");
-  if (raw.length > MAX_GROUPS) throw new ApiError(400, `At most ${MAX_GROUPS} groups`);
-  const names = new Set<string>();
-  const groups: GroupDraft[] = [];
-  for (const item of raw) {
-    const g = asObject(item);
-    const name = typeof g.name === "string" ? g.name.trim() : "";
-    if (!name || name.length > MAX_NAME) {
-      throw new ApiError(400, `Group names must be 1–${MAX_NAME} characters`);
-    }
-    if (names.has(name.toLowerCase())) throw new ApiError(400, `Duplicate group name "${name}"`);
-    names.add(name.toLowerCase());
-    if (!Array.isArray(g.videoIds)) throw new ApiError(400, `Group "${name}" has no videoIds`);
-    const ids: string[] = [];
-    for (const id of g.videoIds) {
-      if (typeof id !== "string" || !allowed.has(id)) {
-        throw new ApiError(400, `Group "${name}" contains a video that is not in the playlist`);
-      }
-      if (!ids.includes(id)) ids.push(id);
-    }
-    if (ids.length > 0) groups.push({ name, videoIds: ids });
-  }
-  if (groups.length === 0) throw new ApiError(400, "The plan has no tracks");
-  return groups;
 }
 
 function requirePlaylist(id: string) {
   const playlist = ready()
     .listPlaylists()
     .find((p) => p.playlistId === id);
-  if (!playlist) throw new ApiError(404, "No such playlist");
+  if (!playlist) throw new RequestError(404, "No such playlist");
   return playlist;
 }
 
 function requireRun(id: string): Run {
   const run = ready().getRun(Number(id));
-  if (!run) throw new ApiError(404, "No such plan");
+  if (!run) throw new RequestError(404, "No such plan");
   return run;
 }
 
@@ -176,7 +123,8 @@ function startJob(...args: Parameters<JobRunner["start"]>): JobView {
   try {
     return jobs.start(...args);
   } catch (err) {
-    throw new ApiError(409, err instanceof Error ? err.message : String(err));
+    if (err instanceof JobBusyError) throw new RequestError(409, err.message);
+    throw err;
   }
 }
 
@@ -196,7 +144,7 @@ const routes: [string, RegExp, Handler][] = [
         ? null
         : "Open Connections in the top bar and pick YouTube to add your Google client ID and secret.",
       signedIn: isSignedIn(),
-      sources: providerStatuses(envVars()),
+      sources: providerStatuses(getKeys()),
       dailyQuota: DAILY_QUOTA,
     }),
   ],
@@ -205,7 +153,7 @@ const routes: [string, RegExp, Handler][] = [
     "POST",
     /^\/api\/auth\/complete$/,
     async (_p, body) => {
-      if (typeof body.url !== "string") throw new ApiError(400, "url is required");
+      if (typeof body.url !== "string") throw new RequestError(400, "url is required");
       await completeAuth(body.url);
       return { ok: true };
     },
@@ -224,12 +172,12 @@ const routes: [string, RegExp, Handler][] = [
     "POST",
     /^\/api\/playlists$/,
     (_p, body) => {
-      if (typeof body.url !== "string") throw new ApiError(400, "url is required");
+      if (typeof body.url !== "string") throw new RequestError(400, "url is required");
       let playlistId: string;
       try {
         playlistId = parsePlaylistId(body.url);
       } catch (err) {
-        throw new ApiError(400, (err as Error).message);
+        throw new RequestError(400, (err as Error).message);
       }
       const yt = youtube();
       return startJob("fetch", "Reading playlist from YouTube", { playlistId }, async (ctx) => {
@@ -373,7 +321,7 @@ const routes: [string, RegExp, Handler][] = [
       const run = requireRun(id);
       const current = jobs.current();
       if (current?.status === "running" && current.runId === run.runId) {
-        throw new ApiError(409, "This run is being applied");
+        throw new RequestError(409, "This run is being applied");
       }
       ready().deleteRun(run.runId);
       return { ok: true };
@@ -384,11 +332,11 @@ const routes: [string, RegExp, Handler][] = [
     /^\/api\/runs\/(\d+)\/apply$/,
     ([id = ""], body) => {
       const run = requireRun(id);
-      if (run.status === "done") throw new ApiError(409, "This run is already done");
+      if (run.status === "done") throw new RequestError(409, "This run is already done");
       const req = body as Partial<ApplyRequest>;
       const privacy: Privacy = req.privacy ?? "private";
       if (!["private", "unlisted", "public"].includes(privacy)) {
-        throw new ApiError(400, "privacy must be private, unlisted or public");
+        throw new RequestError(400, "privacy must be private, unlisted or public");
       }
       const maxWrites = optionalPositiveInt(req.maxWrites, "maxWrites");
       const yt = youtube();
@@ -436,7 +384,7 @@ export async function api<T>(
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
   const method = init.method ?? "GET";
-  const body = asObject(init.body);
+  const body = init.body === undefined ? {} : asObject(init.body);
   for (const [routeMethod, pattern, handler] of routes) {
     const match = pattern.exec(path);
     if (!match) continue;
@@ -444,9 +392,18 @@ export async function api<T>(
     try {
       return (await handler(match.slice(1), body)) as T;
     } catch (err) {
-      if (err instanceof ApiError) throw err;
-      throw new ApiError(500, err instanceof Error ? err.message : String(err));
+      if (err instanceof RequestError) throw err;
+      throw new RequestError(500, err instanceof Error ? err.message : String(err));
     }
   }
-  throw new ApiError(404, `No route for ${method} ${path}`);
+  throw new RequestError(404, `No route for ${method} ${path}`);
 }
+
+/**
+ * The Vite plugin substitutes this module for `frontend/src/api.ts` at build time, which tsc
+ * cannot see. These two assignments are what make the compiler check that the stand-in still
+ * matches what the app imports.
+ */
+const _api: typeof httpApi.api = api;
+const _error: typeof httpApi.ApiError = RequestError;
+void [_api, _error];

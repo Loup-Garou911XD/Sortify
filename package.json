@@ -15,14 +15,14 @@
   "scripts": {
     "dev:backend": "npm run dev -w backend",
     "dev:frontend": "npm run dev -w frontend",
+    "dev:web": "npm run dev -w web",
     "sortify": "npm run -s sortify -w backend --",
     "build": "npm run build -w frontend && npm run build -w backend",
+    "build:web": "npm run build -w web",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm test -w backend",
     "lint": "biome check .",
-    "format": "biome check --write .",
-    "dev:web": "npm run dev -w web",
-    "build:web": "npm run build -w web"
+    "format": "biome check --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14"

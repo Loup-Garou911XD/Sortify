@@ -2,12 +2,14 @@
  * One source's setup, opened from the Connections panel.
  *
  * Says what the source contributes, how to get its key, and takes the key. Sources that need no
- * key still open, so every row in the panel does something.
+ * key still open, so every row in the panel does something. A provider with no entry in
+ * SOURCE_GUIDES still works: the registry supplies its name, its description and its env vars,
+ * so adding a provider to PROVIDERS cannot leave a row here that opens nothing.
  */
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { getKeys, KEYS, SOURCE_GUIDES, saveKeys } from "./settings.ts";
-
-const FIELDS = new Map(KEYS.map((k) => [k.id, k]));
+import type { ProviderStatus } from "../../backend/src/api/types.ts";
+import { Button, Field, Notice } from "../../frontend/src/components/ui.tsx";
+import { getKeys, KEYS, type KeyId, SOURCE_GUIDES, saveKeys } from "./settings.ts";
 
 /** Steps carry this deploy's own URLs, so they can be copied without editing. */
 function fill(step: string): string {
@@ -16,30 +18,36 @@ function fill(step: string): string {
     .replace("{redirect}", location.origin + location.pathname);
 }
 
+const isKey = (name: string): name is KeyId => name in KEYS;
+
 export function KeyDialog({
   sourceId,
+  source,
   onClose,
   onSaved,
 }: {
   sourceId: string;
+  /** The row's own entry from /api/status, used when SOURCE_GUIDES has nothing for it. */
+  source: ProviderStatus | undefined;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const guide = SOURCE_GUIDES[sourceId];
+  const title = guide?.title ?? source?.label ?? sourceId;
+  const blurb = guide?.blurb ?? source?.help ?? "";
+  const steps = guide?.steps ?? [];
+  const fields = guide?.fields ?? (source?.envVars ?? []).filter(isKey);
+
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState<Record<string, string>>(() => {
     const stored = getKeys();
-    const out: Record<string, string> = {};
-    for (const id of guide?.fields ?? []) out[id] = stored[id] ?? "";
-    return out;
+    return Object.fromEntries(fields.map((id) => [id, stored[id] ?? ""]));
   });
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     dialog.current?.showModal();
   }, []);
-
-  if (!guide) return null;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -57,70 +65,64 @@ export function KeyDialog({
     >
       <form onSubmit={submit}>
         <div className="dialog-head">
-          <h2 id="key-dialog-title">{guide.title}</h2>
+          <h2 id="key-dialog-title">{title}</h2>
         </div>
         <div className="dialog-body">
-          <p>{guide.blurb}</p>
+          <p>{blurb}</p>
 
-          <ol className="steps">
-            {guide.steps.map((step) => (
-              <li key={step}>
-                <span>{fill(step)}</span>
-              </li>
-            ))}
-          </ol>
-          {guide.docsUrl && (
+          {steps.length > 0 && (
+            <ol className="steps">
+              {steps.map((step) => (
+                <li key={step}>
+                  <span>{fill(step)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          {guide?.docsUrl && (
             <p className="hint">
               <a className="ext-link" href={guide.docsUrl} target="_blank" rel="noreferrer">
                 {guide.docsLabel ?? "Open the service"}
               </a>
             </p>
           )}
+          {steps.length === 0 && fields.length === 0 && <p className="hint">No key needed.</p>}
 
-          {guide.fields.length > 0 && (
+          {fields.length > 0 && (
             <div className="key-fields">
-              {guide.fields.map((id) => {
-                const field = FIELDS.get(id);
-                return (
-                  <label className="control" key={id}>
-                    <span className="eyebrow">{field?.label ?? id}</span>
-                    <input
-                      type={field && "secret" in field && field.secret ? "password" : "text"}
-                      value={draft[id] ?? ""}
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder="Leave blank to turn this source off"
-                      onChange={(e) => {
-                        setSaved(false);
-                        setDraft((d) => ({ ...d, [id]: e.target.value }));
-                      }}
-                    />
-                    {field?.help && <span className="control-help">{field.help}</span>}
-                  </label>
-                );
-              })}
+              {fields.map((id) => (
+                <Field key={id} label={KEYS[id].label} help={KEYS[id].help}>
+                  <input
+                    type={KEYS[id].secret ? "password" : "text"}
+                    value={draft[id] ?? ""}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="Leave blank to turn this source off"
+                    onChange={(e) => {
+                      setSaved(false);
+                      setDraft((d) => ({ ...d, [id]: e.target.value }));
+                    }}
+                  />
+                </Field>
+              ))}
               <p className="hint">
-                Kept in this browser's local storage and sent only to {guide.title}. Anything that
-                can run script on this page could read it, so use a key you are willing to keep in a
-                browser and revoke it if you stop using this site.
+                Kept in this browser's local storage and sent only to {title}. Anything that can run
+                script on this page could read it, so use a key you are willing to keep in a browser
+                and revoke it if you stop using this site.
               </p>
             </div>
           )}
 
-          {saved && (
-            <div className="notice notice-good">
-              <div className="notice-body">Saved.</div>
-            </div>
-          )}
+          {saved && <Notice tone="good">Saved.</Notice>}
         </div>
         <div className="dialog-actions">
-          <button type="button" className="btn btn-ghost" onClick={() => dialog.current?.close()}>
-            {guide.fields.length > 0 ? "Cancel" : "Close"}
-          </button>
-          {guide.fields.length > 0 && (
-            <button type="submit" className="btn btn-primary">
+          <Button variant="ghost" onClick={() => dialog.current?.close()}>
+            {fields.length > 0 ? "Cancel" : "Close"}
+          </Button>
+          {fields.length > 0 && (
+            <Button type="submit" variant="primary">
               Save
-            </button>
+            </Button>
           )}
         </div>
       </form>

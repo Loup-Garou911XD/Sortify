@@ -18,6 +18,9 @@ const webApi = resolve(here, "src/api.ts");
  * Nothing from the environment is inlined into the bundle: keys are entered in the running app
  * and kept in the browser, so a build can never carry a secret into published JavaScript.
  *
+ * Every backend module the pipeline reaches is free of runtime `node:` imports, so no stubbing
+ * is needed; adding one would break this build.
+ *
  * Set SORTIFY_BASE to the path the site is served from — for a project page that is the repo
  * name, e.g. `/Sortify/`. It defaults to `/` for a user site or a custom domain.
  */
@@ -43,6 +46,26 @@ export default defineConfig({
       },
     },
     {
+      /*
+       * Fail the build on a `node:` import from our own code.
+       *
+       * Vite otherwise externalises builtins silently and the page throws only when the binding
+       * is touched — far from the import that caused it. Any backend module the pipeline reaches
+       * has to work in both shells, so this turns that rule into a build error naming the file.
+       */
+      name: "sortify-no-node-builtins",
+      enforce: "pre",
+      resolveId(source: string, importer: string | undefined) {
+        if (!source.startsWith("node:") || !importer || importer.includes("node_modules")) {
+          return null;
+        }
+        throw new Error(
+          `${importer} imports ${source}, which the browser build cannot load. Move the part ` +
+            "that needs it into a module only the Node shells import.",
+        );
+      },
+    },
+    {
       // GitHub Pages serves 404.html for any path it does not recognise. Making it a copy of
       // index.html is what lets a deep link like /runs/2 load the app instead of an error page.
       name: "sortify-spa-fallback",
@@ -52,10 +75,4 @@ export default defineConfig({
       },
     },
   ],
-  resolve: {
-    alias: [
-      // `tagging/mapper.ts` imports node:fs for the YAML override, which this build never reads.
-      { find: /^node:fs$/, replacement: resolve(here, "src/node-fs-stub.ts") },
-    ],
-  },
 });

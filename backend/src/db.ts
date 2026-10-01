@@ -1,10 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import type { Dimension, TagSource } from "./api/types.ts";
+import { DIMENSIONS, type Dimension, type TagSource } from "./api/types.ts";
 
 export type { Dimension, TagSource };
-export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
+// Re-exported so callers that already reach for the store keep working.
+export { DIMENSIONS };
 
 export interface Track {
   videoId: string;

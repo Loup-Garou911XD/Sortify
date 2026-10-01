@@ -21,10 +21,22 @@ import type {
 } from "../../backend/src/db.ts";
 
 const DB_NAME = "sortify";
-const DB_VERSION = 1;
-const RECORDS = "records";
+/** 2 split the single blob-per-collection store into one record per track, tag and lookup. */
+const DB_VERSION = 2;
+/** The v1 store: one record per collection. Read once on upgrade, then dropped. */
+const LEGACY = "records";
 const FLUSH_MS = 600;
 const SEP = "\x00";
+
+/**
+ * One IndexedDB object store per collection, each keyed by the record's own id, so a write
+ * costs one small `put` instead of re-serialising the collection. `runs` is the exception: the
+ * run list, its groups and the id counters are small and always change together, so they stay
+ * one record under RUNS_KEY.
+ */
+const STORES = ["playlists", "tracks", "tags", "cache", "runs", "items"] as const;
+type StoreName = (typeof STORES)[number];
+const RUNS_KEY = "state";
 
 const now = (): string => new Date().toISOString();
 
@@ -40,6 +52,7 @@ interface PlaylistRow {
   items: string[];
 }
 
+/** The v1 blob, read once on upgrade. */
 interface RunRecord {
   runs: Run[];
   groups: RunGroup[];
@@ -47,35 +60,69 @@ interface RunRecord {
   seq: { run: number; group: number };
 }
 
+/** Runs, their groups and the id counters: small, and always written together. */
+interface RunHeader {
+  runs: Run[];
+  groups: RunGroup[];
+  seq: { run: number; group: number };
+}
+
 interface Snapshot {
   playlists: Map<string, PlaylistRow>;
   tracks: Map<string, TrackRow>;
   tags: Map<string, Tag[]>;
-  cache: Map<string, unknown>;
   runs: Run[];
   groups: RunGroup[];
   items: Map<number, RunItem[]>;
   seq: { run: number; group: number };
 }
 
-type Collection = "playlists" | "tracks" | "tags" | "cache" | "runs";
+function request<T>(req: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
 
 function idb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(RECORDS)) req.result.createObjectStore(RECORDS);
+      const db = req.result;
+      const tx = req.transaction;
+      for (const name of STORES) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
+      if (!tx || !db.objectStoreNames.contains(LEGACY)) return;
+      // Carry a v1 database across rather than making the user fetch and re-tag everything.
+      // The cursor walks the old collection-per-record store; the delete waits until it ends,
+      // so it cannot cut the reads short.
+      tx.objectStore(LEGACY).openCursor().onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (!cursor) {
+          db.deleteObjectStore(LEGACY);
+          return;
+        }
+        const name = String(cursor.key);
+        if (name === "runs") {
+          const legacy = cursor.value as RunRecord;
+          tx.objectStore("runs").put(
+            { runs: legacy.runs, groups: legacy.groups, seq: legacy.seq },
+            RUNS_KEY,
+          );
+          for (const [id, items] of legacy.items ?? []) {
+            tx.objectStore("items").put(items, String(id));
+          }
+        } else if ((STORES as readonly string[]).includes(name)) {
+          for (const [key, value] of (cursor.value as [string, unknown][]) ?? []) {
+            tx.objectStore(name).put(value, key);
+          }
+        }
+        cursor.continue();
+      };
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error("IndexedDB unavailable"));
-  });
-}
-
-function read<T>(db: IDBDatabase, key: Collection): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    const req = db.transaction(RECORDS, "readonly").objectStore(RECORDS).get(key);
-    req.onsuccess = () => resolve(req.result as T | undefined);
-    req.onerror = () => reject(req.error);
   });
 }
 
@@ -89,9 +136,10 @@ export class BrowserStore {
   private readonly items = new Map<number, RunItem[]>();
   private seq = { run: 0, group: 0 };
 
-  private readonly dirty = new Set<Collection>();
+  /** Keys written since the last flush, per store; a key absent from the model is deleted. */
+  private readonly dirty = new Map<StoreName, Set<string>>();
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private depth = 0;
+  private inTx = false;
 
   private constructor(private readonly db: IDBDatabase | null) {}
 
@@ -113,80 +161,124 @@ export class BrowserStore {
     return store;
   }
 
+  /** Reads every store in one transaction, so startup costs one round trip rather than six. */
   private async load(db: IDBDatabase): Promise<void> {
-    for (const [k, v] of (await read<[string, PlaylistRow][]>(db, "playlists")) ?? [])
-      this.playlists.set(k, v);
-    for (const [k, v] of (await read<[string, TrackRow][]>(db, "tracks")) ?? [])
-      this.tracks.set(k, v);
-    for (const [k, v] of (await read<[string, Tag[]][]>(db, "tags")) ?? []) this.tags.set(k, v);
-    for (const [k, v] of (await read<[string, unknown][]>(db, "cache")) ?? []) this.cache.set(k, v);
-    const runs = await read<RunRecord>(db, "runs");
-    if (runs) {
-      this.runs = runs.runs;
-      this.groups = runs.groups;
-      for (const [k, v] of runs.items) this.items.set(k, v);
-      this.seq = runs.seq;
+    const tx = db.transaction(STORES, "readonly");
+    const entries = async <V>(name: StoreName): Promise<[string, V][]> => {
+      const os = tx.objectStore(name);
+      const [keys, values] = await Promise.all([
+        request(os.getAllKeys()),
+        request(os.getAll() as IDBRequest<V[]>),
+      ]);
+      return keys.map((k, i) => [String(k), values[i] as V]);
+    };
+    const [playlists, tracks, tags, cache, runs, items] = await Promise.all([
+      entries<PlaylistRow>("playlists"),
+      entries<TrackRow>("tracks"),
+      entries<Tag[]>("tags"),
+      entries<unknown>("cache"),
+      entries<RunHeader>("runs"),
+      entries<RunItem[]>("items"),
+    ]);
+    for (const [k, v] of playlists) this.playlists.set(k, v);
+    for (const [k, v] of tracks) this.tracks.set(k, v);
+    for (const [k, v] of tags) this.tags.set(k, v);
+    for (const [k, v] of cache) this.cache.set(k, v);
+    for (const [k, v] of items) this.items.set(Number(k), v);
+    const header = runs.find(([k]) => k === RUNS_KEY)?.[1];
+    if (header) {
+      this.runs = header.runs;
+      this.groups = header.groups;
+      this.seq = header.seq;
     }
   }
 
-  private touch(...what: Collection[]): void {
-    for (const c of what) this.dirty.add(c);
-    if (this.depth > 0 || this.timer !== undefined) return;
+  /** Marks one record as needing a write and schedules the flush. */
+  private touch(name: StoreName, key: string | number): void {
+    let keys = this.dirty.get(name);
+    if (!keys) {
+      keys = new Set();
+      this.dirty.set(name, keys);
+    }
+    keys.add(String(key));
+    this.schedule();
+  }
+
+  /** Marks the run list, its groups and the id counters, which always change together. */
+  private touchRuns(): void {
+    this.touch("runs", RUNS_KEY);
+  }
+
+  private schedule(): void {
+    if (this.inTx || this.timer !== undefined) return;
     this.timer = setTimeout(() => this.flush(), FLUSH_MS);
   }
 
-  /** Writes every collection changed since the last flush. Safe to call at any time. */
+  /**
+   * Writes the records changed since the last flush, and only those. A key the model no longer
+   * holds is deleted, which is how removed runs and groups leave the database.
+   */
   flush(): void {
     if (this.timer !== undefined) {
       clearTimeout(this.timer);
       this.timer = undefined;
     }
     if (!this.db || this.dirty.size === 0) return;
-    const os = this.db.transaction(RECORDS, "readwrite").objectStore(RECORDS);
-    for (const c of this.dirty) {
-      if (c === "playlists") os.put([...this.playlists], c);
-      else if (c === "tracks") os.put([...this.tracks], c);
-      else if (c === "tags") os.put([...this.tags], c);
-      else if (c === "cache") os.put([...this.cache], c);
-      else {
-        const record: RunRecord = {
-          runs: this.runs,
-          groups: this.groups,
-          items: [...this.items],
-          seq: this.seq,
-        };
-        os.put(record, c);
+    const tx = this.db.transaction([...this.dirty.keys()], "readwrite");
+    for (const [name, keys] of this.dirty) {
+      const os = tx.objectStore(name);
+      for (const key of keys) {
+        const value = this.record(name, key);
+        if (value === undefined) os.delete(key);
+        else os.put(value, key);
       }
     }
     this.dirty.clear();
   }
 
+  private record(name: StoreName, key: string): unknown {
+    switch (name) {
+      case "playlists":
+        return this.playlists.get(key);
+      case "tracks":
+        return this.tracks.get(key);
+      case "tags":
+        return this.tags.get(key);
+      case "cache":
+        return this.cache.get(key);
+      case "items":
+        return this.items.get(Number(key));
+      default:
+        return { runs: this.runs, groups: this.groups, seq: this.seq };
+    }
+  }
+
   /**
-   * Runs `fn` as one unit. Collections are snapshotted first and restored if it throws, so a
-   * failed stage cannot leave the model half-written — the guarantee SQLite gives with BEGIN.
-   * Every write below replaces objects rather than mutating them, which is what makes a
-   * shallow snapshot enough.
+   * Runs `fn` as one unit. The collections it can touch are snapshotted first and restored if it
+   * throws, so a failed stage cannot leave the model half-written — the guarantee SQLite gives
+   * with BEGIN. Every write below replaces objects rather than mutating them, which is what
+   * makes a shallow snapshot enough. The lookup cache is left out: `cachePut` is the only writer
+   * and it never runs inside a transaction, so copying it per track would be pure waste.
    */
   tx<T>(fn: () => T): T {
-    if (this.depth > 0) return fn();
+    if (this.inTx) return fn();
     const snapshot: Snapshot = {
       playlists: new Map(this.playlists),
       tracks: new Map(this.tracks),
       tags: new Map(this.tags),
-      cache: new Map(this.cache),
       runs: [...this.runs],
       groups: [...this.groups],
       items: new Map(this.items),
       seq: { ...this.seq },
     };
-    this.depth++;
+    this.inTx = true;
     try {
       const result = fn();
-      this.depth--;
-      this.touch();
+      this.inTx = false;
+      this.schedule();
       return result;
     } catch (err) {
-      this.depth--;
+      this.inTx = false;
       this.restore(snapshot);
       throw err;
     }
@@ -200,7 +292,6 @@ export class BrowserStore {
     reset(this.playlists, s.playlists);
     reset(this.tracks, s.tracks);
     reset(this.tags, s.tags);
-    reset(this.cache, s.cache);
     reset(this.items, s.items);
     this.runs = s.runs;
     this.groups = s.groups;
@@ -237,8 +328,9 @@ export class BrowserStore {
           title: item.title,
           channel: item.channel,
         });
+        this.touch("tracks", item.videoId);
       }
-      this.touch("playlists", "tracks");
+      this.touch("playlists", playlistId);
     });
   }
 
@@ -275,9 +367,10 @@ export class BrowserStore {
     this.tx(() => {
       for (const [videoId, d] of details) {
         const row = this.tracks.get(videoId);
-        if (row) this.tracks.set(videoId, { ...row, durationS: d.durationS, topics: d.topics });
+        if (!row) continue;
+        this.tracks.set(videoId, { ...row, durationS: d.durationS, topics: d.topics });
+        this.touch("tracks", videoId);
       }
-      this.touch("tracks");
     });
   }
 
@@ -313,7 +406,8 @@ export class BrowserStore {
         if (!current || t.weight > current.weight) best.set(key, t);
       }
       this.tags.set(videoId, [...best.values()]);
-      this.touch("tracks", "tags");
+      this.touch("tracks", videoId);
+      this.touch("tags", videoId);
     });
   }
 
@@ -341,8 +435,9 @@ export class BrowserStore {
   }
 
   cachePut(source: string, key: string, body: unknown): void {
-    this.cache.set(source + SEP + key, body);
-    this.touch("cache");
+    const id = source + SEP + key;
+    this.cache.set(id, body);
+    this.touch("cache", id);
   }
 
   // --- runs -------------------------------------------------------------------------
@@ -377,8 +472,9 @@ export class BrowserStore {
             written: false,
           })),
         );
+        this.touch("items", groupId);
       }
-      this.touch("runs");
+      this.touchRuns();
       return runId;
     });
   }
@@ -405,15 +501,20 @@ export class BrowserStore {
           }
         : r,
     );
-    this.touch("runs");
+    this.touchRuns();
   }
 
   deleteRun(runId: number): void {
     this.tx(() => {
-      for (const g of this.groups) if (g.runId === runId) this.items.delete(g.groupId);
+      for (const g of this.groups) {
+        if (g.runId !== runId) continue;
+        this.items.delete(g.groupId);
+        // The key is gone from the model, so the flush deletes its record.
+        this.touch("items", g.groupId);
+      }
       this.groups = this.groups.filter((g) => g.runId !== runId);
       this.runs = this.runs.filter((r) => r.runId !== runId);
-      this.touch("runs");
+      this.touchRuns();
     });
   }
 
@@ -429,7 +530,7 @@ export class BrowserStore {
     this.groups = this.groups.map((g) =>
       g.groupId === groupId ? { ...g, targetPlaylistId: playlistId } : g,
     );
-    this.touch("runs");
+    this.touchRuns();
   }
 
   markWritten(groupId: number, videoId: string): void {
@@ -439,7 +540,7 @@ export class BrowserStore {
       groupId,
       list.map((i) => (i.videoId === videoId ? { ...i, written: true } : i)),
     );
-    this.touch("runs");
+    this.touch("items", groupId);
   }
 
   // --- summaries for the UI ------------------------------------------------------------

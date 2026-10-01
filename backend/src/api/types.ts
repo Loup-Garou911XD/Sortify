@@ -1,9 +1,12 @@
 /**
- * JSON shapes exchanged between the local server (src/server) and the web UI (web/). Kept free of
- * runtime imports so the browser bundle can import it for types only.
+ * JSON shapes exchanged between the local server (src/server) and the web UI (web/). It imports
+ * nothing, so every shell can use it — including the browser build, which cannot load `node:`
+ * modules at all.
  */
 
 export type Dimension = "subgenre" | "mood" | "type";
+/** Every dimension, for validating input and listing choices. */
+export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
 /** Where a tag came from: "rule" (title rules) or a provider id (see ProviderStatus). */
 export type TagSource = string;
 export type RunStatus = "planned" | "applying" | "paused" | "done";

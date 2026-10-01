@@ -4,8 +4,7 @@
  * routes in the page. Anything that decides whether a request is acceptable belongs here, so
  * the two shells cannot drift.
  */
-import type { Dimension, GroupDraft } from "../api/types.ts";
-import { DIMENSIONS } from "../db.ts";
+import { DIMENSIONS, type Dimension, type GroupDraft } from "../api/types.ts";
 
 export const MAX_GROUPS = 500;
 export const MAX_NAME = 100;
@@ -19,8 +18,12 @@ export class RequestError extends Error {
   }
 }
 
-export const asObject = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+export function asObject(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new RequestError(400, "Expected a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
 
 export function optionalPositiveInt(value: unknown, name: string): number | undefined {
   if (value === undefined || value === null || value === "") return undefined;
@@ -50,9 +53,10 @@ export function validateGroups(raw: unknown, allowed: Set<string>): GroupDraft[]
     const g = asObject(item);
     const name = typeof g.name === "string" ? g.name.trim() : "";
     if (!name || name.length > MAX_NAME) {
-      throw new RequestError(400, `Group names must be 1\u2013${MAX_NAME} characters`);
+      throw new RequestError(400, `Group names must be 1–${MAX_NAME} characters`);
     }
-    if (names.has(name.toLowerCase())) throw new RequestError(400, `Duplicate group name "${name}"`);
+    if (names.has(name.toLowerCase()))
+      throw new RequestError(400, `Duplicate group name "${name}"`);
     names.add(name.toLowerCase());
     if (!Array.isArray(g.videoIds)) throw new RequestError(400, `Group "${name}" has no videoIds`);
     const ids: string[] = [];

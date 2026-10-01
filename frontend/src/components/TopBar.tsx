@@ -213,7 +213,7 @@ export function TopBar({
                       name={s.label}
                       state={s.configured ? "Ready" : "Off"}
                       help={s.help}
-                      keys={configureSource ? [] : s.envVars}
+                      keys={!configureSource && !s.configured ? s.envVars : []}
                       onClick={
                         configureSource &&
                         (() => {

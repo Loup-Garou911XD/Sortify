@@ -38,17 +38,15 @@ passes nothing and its rows stay plain text, exactly as before.
    | Authorized JavaScript origins | `https://<user>.github.io` | An origin only: scheme, host, port. A path is rejected. |
    | Authorized redirect URIs | `https://<user>.github.io/Sortify/` | Matched exactly, path and trailing slash included. |
 
-   The Settings dialog prints both values for your own deploy, so copy them from there. Add
-   yourself as a test user while the app is in testing mode.
+   The YouTube dialog under Connections prints both values for your own deploy, so copy them
+   from there. Add yourself as a test user while the app is in testing mode.
 3. **Open the site and use Connections in the top bar.** If your keys already sit in a `.env`
    file, **Import keys from a .env file** at the bottom of that panel reads them all at once,
    under the same names the backend uses, and unwraps a Web application client stored as
    `SORTIFY_CLIENT_SECRETS` JSON. File pickers hide dotfiles, so pasting the contents works too.
-   Otherwise, enter them one source at a time: Every row there is a button: pick
-   **YouTube** to paste the Google client ID and secret, or a tag source to see how to get its key
-   and enter it. The YouTube dialog prints the exact origin and redirect URI for your own deploy,
-   so you can copy them straight into Google Cloud Console. MusicBrainz, iTunes and YouTube topics
-   need no key and say so.
+   Otherwise enter them one at a time: every row in that panel is a button. Pick **YouTube** for
+   the Google client ID and secret, or a tag source to see how to get its key. MusicBrainz,
+   iTunes and YouTube topics need no key and say so.
 4. **Connect YouTube**, then use it exactly as you would locally.
 
 ## What you are trading away

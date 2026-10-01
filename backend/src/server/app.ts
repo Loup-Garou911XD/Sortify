@@ -4,9 +4,7 @@ import { extname, join, resolve, sep } from "node:path";
 import type {
   ApplyRequest,
   CreateRunRequest,
-  Dimension,
   EnrichRequest,
-  GroupDraft,
   PlaylistDetail,
   PreviewRequest,
   PreviewResponse,
@@ -18,7 +16,7 @@ import type {
 } from "../api/types.ts";
 import { applyRun, type PlaylistWriter } from "../apply.ts";
 import { type Config, VERSION } from "../config.ts";
-import { DIMENSIONS, type Run, type Store } from "../db.ts";
+import type { Run, Store } from "../db.ts";
 import { enrichPlaylist } from "../enrich/pipeline.ts";
 import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
@@ -34,6 +32,13 @@ import {
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
 import { watchLinks } from "../youtube/watchLinks.ts";
 import { JobBusyError, JobRunner } from "./jobs.ts";
+import {
+  asObject,
+  dimensionOf,
+  RequestError as HttpError,
+  optionalPositiveInt,
+  validateGroups,
+} from "./validate.ts";
 
 export type YouTubeApi = PlaylistReader & PlaylistWriter;
 
@@ -56,17 +61,7 @@ export interface AppDeps {
   };
 }
 
-class HttpError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
 const MAX_BODY = 10 * 1024 * 1024;
-const MAX_GROUPS = 500;
-const MAX_NAME = 100;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -102,59 +97,6 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch {
     throw new HttpError(400, "Invalid JSON");
   }
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new HttpError(400, "Expected a JSON object");
-  }
-  return value as Record<string, unknown>;
-}
-
-function optionalPositiveInt(value: unknown, name: string): number | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw new HttpError(400, `${name} must be a positive integer`);
-  }
-  return value;
-}
-
-function dimensionOf(value: unknown): Dimension {
-  if (typeof value !== "string" || !(DIMENSIONS as readonly string[]).includes(value)) {
-    throw new HttpError(400, `dimension must be one of ${DIMENSIONS.join(", ")}`);
-  }
-  return value as Dimension;
-}
-
-/**
- * Checks edited groups against the playlist: known videos only, unique non-empty names, no
- * duplicates inside a group. Empty groups are dropped.
- */
-export function validateGroups(raw: unknown, allowed: Set<string>): GroupDraft[] {
-  if (!Array.isArray(raw)) throw new HttpError(400, "groups must be an array");
-  if (raw.length > MAX_GROUPS) throw new HttpError(400, `At most ${MAX_GROUPS} groups`);
-  const names = new Set<string>();
-  const groups: GroupDraft[] = [];
-  for (const item of raw) {
-    const g = asObject(item);
-    const name = typeof g.name === "string" ? g.name.trim() : "";
-    if (!name || name.length > MAX_NAME) {
-      throw new HttpError(400, `Group names must be 1–${MAX_NAME} characters`);
-    }
-    if (names.has(name.toLowerCase())) throw new HttpError(400, `Duplicate group name "${name}"`);
-    names.add(name.toLowerCase());
-    if (!Array.isArray(g.videoIds)) throw new HttpError(400, `Group "${name}" has no videoIds`);
-    const ids: string[] = [];
-    for (const id of g.videoIds) {
-      if (typeof id !== "string" || !allowed.has(id)) {
-        throw new HttpError(400, `Group "${name}" contains a video that is not in the playlist`);
-      }
-      if (!ids.includes(id)) ids.push(id);
-    }
-    if (ids.length > 0) groups.push({ name, videoIds: ids });
-  }
-  if (groups.length === 0) throw new HttpError(400, "The plan has no tracks");
-  return groups;
 }
 
 function isLocalHost(hostname: string): boolean {

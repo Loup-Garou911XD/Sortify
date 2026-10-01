@@ -1,14 +1,14 @@
-import "./shims.ts";
-
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../../frontend/src/App.tsx";
 import "../../frontend/src/styles.css";
 import "./web.css";
+import { providerStatuses } from "../../backend/src/enrich/providers.ts";
 import { boot } from "./api.ts";
 import { completeAuth } from "./auth.ts";
 import { ImportDialog } from "./ImportDialog.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
+import { getKeys } from "./settings.ts";
 import { BrowserStore } from "./store.ts";
 
 /**
@@ -41,23 +41,22 @@ function Root() {
   const [editing, setEditing] = useState<string | null>(null);
   // Saving a key changes what /api/status reports, so remount the app to pick it up.
   const [generation, setGeneration] = useState(0);
+  const close = () => setEditing(null);
+  const bump = () => setGeneration((g) => g + 1);
   return (
     <>
       <App key={generation} configureSource={setEditing} />
-      {editing === "import" && (
-        <ImportDialog
-          onClose={() => setEditing(null)}
-          onSaved={() => setGeneration((g) => g + 1)}
-        />
-      )}
-      {editing && editing !== "import" && (
+      {editing === "import" ? (
+        <ImportDialog onClose={close} onSaved={bump} />
+      ) : editing ? (
         <KeyDialog
           key={editing}
           sourceId={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => setGeneration((g) => g + 1)}
+          source={providerStatuses(getKeys()).find((s) => s.id === editing)}
+          onClose={close}
+          onSaved={bump}
         />
-      )}
+      ) : null}
     </>
   );
 }

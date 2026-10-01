@@ -7,50 +7,51 @@
  * a browser, and revoke them from the issuing service if the machine is shared.
  */
 
-/** Everything the app can be given, in the order the settings screen shows it. */
-export const KEYS = [
-  {
-    id: "GOOGLE_CLIENT_ID",
+interface KeyDef {
+  label: string;
+  help: string;
+  /** Rendered as a password field. */
+  secret?: boolean;
+}
+
+/** Everything the app can be given. Insertion order is the order dialogs show the fields in. */
+const DEFS = {
+  GOOGLE_CLIENT_ID: {
     label: "Google client ID",
     help: "From an OAuth client of type Web application in Google Cloud Console.",
-    required: true,
   },
-  {
-    id: "GOOGLE_CLIENT_SECRET",
+  GOOGLE_CLIENT_SECRET: {
     label: "Google client secret",
     help: "Issued with the client ID. Needed to exchange and refresh the sign-in token.",
-    required: true,
     secret: true,
   },
-  {
-    id: "DISCOGS_TOKEN",
+  DISCOGS_TOKEN: {
     label: "Discogs token",
-    help: "The main subgenre source. developer.discogs.com → personal access token.",
+    help: "developer.discogs.com → personal access token.",
   },
-  {
-    id: "LASTFM_API_KEY",
+  LASTFM_API_KEY: {
     label: "Last.fm API key",
-    help: "The only mood source. last.fm/api/account/create.",
+    help: "last.fm/api/account/create.",
   },
-  {
-    id: "SPOTIFY_CLIENT_ID",
+  SPOTIFY_CLIENT_ID: {
     label: "Spotify client ID",
-    help: "Detailed artist genres. developer.spotify.com → create an app.",
+    help: "developer.spotify.com → create an app.",
   },
-  {
-    id: "SPOTIFY_CLIENT_SECRET",
+  SPOTIFY_CLIENT_SECRET: {
     label: "Spotify client secret",
     help: "Issued with the Spotify client ID.",
     secret: true,
   },
-  {
-    id: "ITUNES_COUNTRY",
+  ITUNES_COUNTRY: {
     label: "iTunes store",
     help: "Two-letter country for the iTunes store, e.g. IN or US. Defaults to US.",
   },
-] as const;
+} satisfies Record<string, KeyDef>;
 
-export type KeyId = (typeof KEYS)[number]["id"];
+export type KeyId = keyof typeof DEFS;
+
+/** The same object, typed uniformly so `KEYS[id].secret` reads on every entry. */
+export const KEYS: Record<KeyId, KeyDef> = DEFS;
 
 /**
  * What each row of the Connections panel opens: what the source gives you, how to get its key,
@@ -151,6 +152,10 @@ function read(): Record<string, string> {
 
 let cached = read();
 
+/**
+ * The stored keys. The shape is also what the provider registry expects of `process.env`, so
+ * `providerStatuses` and `createProviderClients` take it unchanged.
+ */
 export function getKeys(): Record<string, string> {
   return { ...cached };
 }
@@ -175,28 +180,11 @@ export function saveKeys(next: Record<string, string>): void {
   }
 }
 
-/**
- * The keys shaped the way the provider registry expects `process.env`, so `providerStatuses`
- * and `createProviderClients` work unchanged.
- */
-export function envVars(): Record<string, string | undefined> {
-  return { ...cached };
-}
-
-/** Recognised names. A `VITE_` prefix is tolerated, since some toolchains add one. */
-const ALIASES: Record<string, KeyId> = {};
-for (const k of KEYS) {
-  ALIASES[k.id] = k.id;
-  ALIASES[`VITE_${k.id}`] = k.id;
-}
-
 /** The backend's OAuth client, which is a JSON blob rather than a plain key. */
 const CLIENT_SECRETS = "SORTIFY_CLIENT_SECRETS";
 
 export interface ParsedEnv {
   keys: Partial<Record<KeyId, string>>;
-  /** Labels of the keys that were recognised, for showing what an import would do. */
-  found: string[];
   /** Names that were parsed but mean nothing here. */
   ignored: string[];
   /** Set when the file held a Desktop-app OAuth client, which a browser cannot use. */
@@ -226,9 +214,7 @@ function unquote(raw: string): string {
  * application client, and reported when it is a Desktop one.
  */
 export function parseEnv(text: string): ParsedEnv {
-  const labels = new Map(KEYS.map((k) => [k.id as string, k.label]));
   const keys: Partial<Record<KeyId, string>> = {};
-  const found: string[] = [];
   const ignored: string[] = [];
   let desktopClient = false;
   let clientSecretsPath = false;
@@ -252,20 +238,15 @@ export function parseEnv(text: string): ParsedEnv {
       } else if (client) {
         keys.GOOGLE_CLIENT_ID = client.id;
         keys.GOOGLE_CLIENT_SECRET = client.secret;
-        found.push("Google client ID", "Google client secret");
       }
       continue;
     }
 
-    const id = ALIASES[name];
-    if (id) {
-      keys[id] = value;
-      found.push(labels.get(id) ?? id);
-    } else ignored.push(name);
+    if (name in KEYS) keys[name as KeyId] = value;
+    else ignored.push(name);
   }
   return {
     keys,
-    found: [...new Set(found)],
     ignored: [...new Set(ignored)],
     desktopClient,
     clientSecretsPath,
