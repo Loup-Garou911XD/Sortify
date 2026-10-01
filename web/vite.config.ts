@@ -27,6 +27,12 @@ const webApi = resolve(here, "src/api.ts");
 export default defineConfig({
   root: here,
   base: process.env.SORTIFY_BASE ?? "/",
+  /*
+   * Pinned, because the dev URL is also an OAuth redirect URI and has to be registered on the
+   * Google client. Letting Vite fall back to the next free port would silently change it and
+   * break sign-in with redirect_uri_mismatch. Fail loudly instead.
+   */
+  server: { port: 5173, strictPort: true },
   plugins: [
     react(),
     {

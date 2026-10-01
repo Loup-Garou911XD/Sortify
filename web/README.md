@@ -44,7 +44,12 @@ passes nothing and its rows stay plain text, exactly as before.
    | --- | --- |
    | `http://127.0.0.1:4747/` | `sortify ui` sign-in |
    | `http://127.0.0.1:4748/` | `sortify auth` |
-   | `https://sortify.example.com/` | this build |
+   | `https://sortify.example.com/` | this build, deployed |
+   | `http://localhost:5173/` | this build, under `npm run dev:web` |
+
+   Add `http://localhost:5173` as a JavaScript origin too if you want to sign in while
+   developing. Google treats `localhost` and `127.0.0.1` as different origins and matches the
+   whole string, so register exactly what the address bar shows.
 
    Only this build needs a JavaScript origin. The two fields take different values, and neither
    accepts the other's:
@@ -101,7 +106,7 @@ so you reconnect YouTube once.
 ## Running it locally
 
 ```sh
-npm run dev:web      # Vite on :5173, no backend needed
+npm run dev:web      # Vite on :5173 (pinned; fails rather than drifting), no backend needed
 npm run build:web    # static site into web/dist
 SORTIFY_BASE=/Sortify/ npm run build:web   # for a project page
 ```
