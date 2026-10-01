@@ -653,6 +653,10 @@ li:hover > .row-btn,
   z-index: 40;
   min-width: 200px;
   max-width: min(340px, calc(100vw - 24px));
+  /* A long list must scroll inside the panel rather than run off the bottom of the screen. */
+  max-height: calc(100dvh - var(--topbar) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   background: var(--panel);
   border: 1px solid var(--line-2);
@@ -1888,5 +1892,20 @@ li:hover > .row-btn,
 @media (max-width: 560px) {
   .trigger-word {
     display: none;
+  }
+
+  /*
+   * The trigger shrinks to a dot here, so the wide panel, anchored to its right edge, hung off
+   * the left of the screen. It becomes a sheet under the top bar instead, spanning the viewport
+   * with a gutter. `min-width` has to be cleared as well: it beats `max-width`, which is what
+   * pushed it past the edge in the first place. The short menus still fit where they are.
+   */
+  .menu-pop.wide {
+    position: fixed;
+    top: calc(var(--topbar) + 6px);
+    right: 12px;
+    left: 12px;
+    min-width: 0;
+    max-width: none;
   }
 }

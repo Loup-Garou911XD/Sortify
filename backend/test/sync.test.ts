@@ -249,4 +249,34 @@ describe("DriveSnapshots", () => {
     });
     await assert.rejects(() => drive.find(), DriveAuthError);
   });
+
+  it("tells a missing scope apart from a disabled API", async () => {
+    // Both arrive as 403 and the fix for one is no use for the other.
+    const refuse = (body: string) =>
+      new DriveSnapshots({
+        getAccessToken: token,
+        fetch: async () => new Response(body, { status: 403 }),
+      });
+
+    const scope = refuse(
+      JSON.stringify({ error: { message: "Request had insufficient authentication scopes." } }),
+    );
+    await assert.rejects(
+      () => scope.find(),
+      (err: Error) => /connect YouTube again/i.test(err.message),
+    );
+
+    const disabled = refuse(
+      JSON.stringify({
+        error: {
+          message: "Google Drive API has not been used in project 1 before or it is disabled.",
+          errors: [{ reason: "accessNotConfigured" }],
+        },
+      }),
+    );
+    await assert.rejects(
+      () => disabled.find(),
+      (err: Error) => /Drive API, which is not enabled/i.test(err.message),
+    );
+  });
 });

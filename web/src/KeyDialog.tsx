@@ -9,13 +9,17 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { ProviderStatus } from "../../backend/src/api/types.ts";
 import { Button, Field, Notice } from "../../frontend/src/components/ui.tsx";
+import { redirectUri } from "./auth.ts";
 import { getKeys, KEYS, type KeyId, SOURCE_GUIDES, saveKeys } from "./settings.ts";
 
 /** Steps carry this deploy's own URLs, so they can be copied without editing. */
 function fill(step: string): string {
-  return step
-    .replace("{origin}", location.origin)
-    .replace("{redirect}", location.origin + location.pathname);
+  return (
+    step
+      .replace("{origin}", location.origin)
+      // The same value sign-in actually sends, so the steps cannot drift from the code.
+      .replace("{redirect}", redirectUri())
+  );
 }
 
 const isKey = (name: string): name is KeyId => name in KEYS;

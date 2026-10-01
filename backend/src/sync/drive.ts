@@ -35,6 +35,45 @@ export class DriveAuthError extends Error {
   }
 }
 
+/**
+ * Says why Google refused, because 403 covers two very different problems and the fix for one
+ * is no use for the other: a token that predates the `drive.appdata` scope, or a Cloud project
+ * where the Drive API was never switched on.
+ */
+async function refusal(res: Response): Promise<DriveAuthError> {
+  const body = await res.text().catch(() => "");
+  // Google's own text carries a console link with the project id already in it, which is far
+  // more useful than anything that can be written here, so it is passed through.
+  let detail = "";
+  try {
+    const message = (JSON.parse(body) as { error?: { message?: string } }).error?.message;
+    if (message) detail = ` Google says: ${message}`;
+  } catch {
+    // Not JSON; the status alone will have to do.
+  }
+  const reason = /accessNotConfigured|has not been used in project|SERVICE_DISABLED/.test(body)
+    ? "disabled"
+    : /insufficient|ACCESS_TOKEN_SCOPE_INSUFFICIENT|forbidden/i.test(body)
+      ? "scope"
+      : "unknown";
+  if (reason === "disabled") {
+    return new DriveAuthError(
+      "Syncing needs the Google Drive API, which is not enabled for your Cloud project. Enable " +
+        `it at console.cloud.google.com/apis/library/drive.googleapis.com, then try again.${detail}`,
+    );
+  }
+  if (reason === "scope") {
+    return new DriveAuthError(
+      "This sign-in predates syncing, so it does not cover the Drive folder. Sign out and " +
+        `connect YouTube again to grant it.${detail}`,
+    );
+  }
+  return new DriveAuthError(
+    `Google refused access to the Sortify sync folder (${res.status}). Sign in again, and check ` +
+      `that the Google Drive API is enabled for your Cloud project.${detail}`,
+  );
+}
+
 interface FileResource {
   id?: string;
   modifiedTime?: string;
@@ -58,12 +97,7 @@ export class DriveSnapshots {
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${token}` },
     });
-    if (res.status === 401 || res.status === 403) {
-      // Almost always the drive.appdata permission missing from an older sign-in.
-      throw new DriveAuthError(
-        "Google refused access to the Sortify sync folder. Sign in again to grant it.",
-      );
-    }
+    if (res.status === 401 || res.status === 403) throw await refusal(res);
     if (!res.ok) {
       throw new Error(`Google Drive returned ${res.status} ${res.statusText}`.trim());
     }

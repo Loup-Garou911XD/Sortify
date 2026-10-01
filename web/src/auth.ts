@@ -46,9 +46,16 @@ interface TokenResponse {
   error_description?: string;
 }
 
-/** The page itself is the redirect target, so this must be an Authorized redirect URI. */
+/**
+ * Where Google sends the browser back to, and so the value that must be registered as an
+ * Authorized redirect URI.
+ *
+ * It is the app's base, never the page currently open: starting sign-in from a deep link like
+ * /playlists/PL… would otherwise send that path as the redirect URI, and no registered entry
+ * could ever match it. BASE_URL is "/" for a custom domain and "/<repo>/" for a project page.
+ */
 export function redirectUri(): string {
-  return location.origin + location.pathname;
+  return new URL(import.meta.env.BASE_URL, location.origin).href;
 }
 
 function readJson<T>(storage: Storage, key: string): T | null {
