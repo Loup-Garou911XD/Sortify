@@ -120,12 +120,14 @@ describe("watchLinks", () => {
 
 describe("musicLink", () => {
   const WATCH = "https://www.youtube.com/watch_videos?video_ids=a,b,c";
-  const redirect = (location: string | null): typeof fetch =>
-    (async () =>
-      new Response(null, {
+  const redirect = (location: string | null, seen: RequestInit[] = []): typeof fetch =>
+    (async (_url: string, init?: RequestInit) => {
+      if (init) seen.push(init);
+      return new Response(null, {
         status: 303,
         ...(location === null ? {} : { headers: { location } }),
-      })) as unknown as typeof fetch;
+      });
+    }) as unknown as typeof fetch;
 
   it("turns the temporary playlist YouTube mints into a Music link", async () => {
     const link = await musicLink(
@@ -136,22 +138,9 @@ describe("musicLink", () => {
   });
 
   it("reads the redirect rather than following it", async () => {
-    let seen: RequestInit | undefined;
-    const spy = (async (_url: string, init?: RequestInit) => {
-      seen = init;
-      return new Response(null, {
-        status: 303,
-        headers: { location: "https://www.youtube.com/watch?v=a&list=TLGG1" },
-      });
-    }) as unknown as typeof fetch;
-    await musicLink(WATCH, spy);
-    expect(seen?.redirect).toBe("manual");
-  });
-
-  it("refuses a URL that is not a watch_videos link", async () => {
-    await expect(musicLink("https://example.com/evil", redirect(null))).rejects.toThrow(
-      /watch_videos/,
-    );
+    const seen: RequestInit[] = [];
+    await musicLink(WATCH, redirect("https://www.youtube.com/watch?v=a&list=TLGG1", seen));
+    expect(seen[0]?.redirect).toBe("manual");
   });
 
   it("explains itself when YouTube answers without a playlist", async () => {

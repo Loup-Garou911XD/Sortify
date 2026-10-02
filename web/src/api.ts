@@ -14,18 +14,22 @@ import type {
   PlaylistDetail,
   PreviewRequest,
   PreviewResponse,
-  RunDetail,
-  RunSummary,
   StatusResponse,
   TrackView,
 } from "../../backend/src/api/types.ts";
 import { applyRun, type Privacy } from "../../backend/src/apply.ts";
-import type { Cache, Run } from "../../backend/src/db.ts";
+import type { Cache } from "../../backend/src/db.ts";
 import { Budget, type LookupDeps } from "../../backend/src/enrich/lookup.ts";
 import { type Enrichers, enrichPlaylist } from "../../backend/src/enrich/pipeline.ts";
 import { createProviderClients, providerStatuses } from "../../backend/src/enrich/providers.ts";
 import { planGroups } from "../../backend/src/planner.ts";
 import { JobBusyError, JobRunner } from "../../backend/src/server/jobs.ts";
+import {
+  groupMusicLink,
+  runDetail,
+  runSummary,
+  requireRun as sharedRequireRun,
+} from "../../backend/src/server/runs.ts";
 import {
   asObject,
   dimensionOf,
@@ -39,7 +43,7 @@ import { syncView } from "../../backend/src/sync/view.ts";
 import { TagMapper } from "../../backend/src/tagging/mapper.ts";
 import { YouTubeClient } from "../../backend/src/youtube/client.ts";
 import { parsePlaylistId } from "../../backend/src/youtube/playlistUrl.ts";
-import { watchLinks } from "../../backend/src/youtube/watchLinks.ts";
+import type { musicLink } from "../../backend/src/youtube/watchLinks.ts";
 import type * as httpApi from "../../frontend/src/api.ts";
 import { completeAuth, getAccessToken, isSignedIn, signOut, startAuth } from "./auth.ts";
 import { getKeys, hasGoogleClient } from "./settings.ts";
@@ -106,28 +110,9 @@ function requirePlaylist(id: string) {
   return playlist;
 }
 
-function requireRun(id: string): Run {
-  const run = ready().getRun(Number(id));
-  if (!run) throw new RequestError(404, "No such plan");
-  return run;
-}
-
-function runSummary(run: Run): RunSummary {
-  const groups = ready().runGroupProgress(run.runId);
-  return {
-    runId: run.runId,
-    sourcePlaylistId: run.sourcePlaylistId,
-    sourceTitle: ready().getPlaylist(run.sourcePlaylistId)?.title ?? run.sourcePlaylistId,
-    dimension: run.dimension,
-    status: run.status,
-    createdAt: run.createdAt,
-    quotaUsed: run.quotaUsed,
-    writesDone: run.writesDone,
-    groupCount: groups.length,
-    total: groups.reduce((sum, g) => sum + g.total, 0),
-    written: groups.reduce((sum, g) => sum + g.written, 0),
-  };
-}
+const requireRun = (id: string) => sharedRequireRun(ready(), id);
+// A page cannot read the redirect `musicLink` needs (see there), so this build has no resolver.
+const musicLinks: typeof musicLink | undefined = undefined;
 
 function startJob(...args: Parameters<JobRunner["start"]>): JobView {
   try {
@@ -157,9 +142,7 @@ const routes: [string, RegExp, Handler][] = [
       sources: providerStatuses(getKeys()),
       dailyQuota: DAILY_QUOTA,
       sync: sync ? syncView(sync.status()) : null,
-      // A page cannot read YouTube's watch_videos redirect: no CORS headers, and the preflight
-      // is a 405. So there is no YouTube Music link in this build.
-      opensInMusic: false,
+      opensInMusic: musicLinks !== undefined,
     }),
   ],
   ["POST", /^\/api\/auth\/start$/, async () => ({ url: await startAuth() })],
@@ -316,31 +299,21 @@ const routes: [string, RegExp, Handler][] = [
     },
   ],
 
-  ["GET", /^\/api\/runs$/, () => ready().listRuns().map(runSummary)],
+  [
+    "POST",
+    /^\/api\/runs\/(\d+)\/groups\/(\d+)\/music-link$/,
+    ([id = "", groupId = ""], body) =>
+      groupMusicLink(ready(), requireRun(id), groupId, body, musicLinks),
+  ],
   [
     "GET",
-    /^\/api\/runs\/(\d+)$/,
-    ([id = ""]): RunDetail => {
-      const run = requireRun(id);
-      return {
-        run: runSummary(run),
-        groups: ready()
-          .runGroupProgress(run.runId)
-          .map((g) => ({
-            groupId: g.groupId,
-            name: g.name,
-            targetPlaylistId: g.targetPlaylistId,
-            total: g.total,
-            written: g.written,
-            watchLinks: watchLinks(
-              ready()
-                .groupItems(g.groupId)
-                .map((i) => i.videoId),
-            ),
-          })),
-      };
-    },
+    /^\/api\/runs$/,
+    () =>
+      ready()
+        .listRuns()
+        .map((r) => runSummary(ready(), r)),
   ],
+  ["GET", /^\/api\/runs\/(\d+)$/, ([id = ""]) => runDetail(ready(), requireRun(id))],
   [
     "DELETE",
     /^\/api\/runs\/(\d+)$/,

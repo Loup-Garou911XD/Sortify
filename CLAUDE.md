@@ -130,8 +130,10 @@ What differs from the local app, and why:
   URLs. YouTube answers one with a 303 to `watch?v=<first>&list=<id>`, and that id opens in
   YouTube Music, but reading the redirect needs something that is not a browser: YouTube sends no
   `access-control-allow-origin` there and answers the preflight with 405. So `musicLink()` runs
-  server-side behind `POST /api/music-link`, `StatusResponse.opensInMusic` says whether the shell
-  can do it, and this build sets it false and shows only the youtube.com link.
+  server-side behind `POST /api/runs/:id/groups/:g/music-link`. Both shells register that route
+  with the same body (`groupMusicLink` in `server/runs.ts`, which rebuilds the link from the
+  stored group, so it never fetches a client-supplied URL); this build passes no resolver, so the
+  route answers 501, `StatusResponse.opensInMusic` is false, and only the youtube.com link shows.
 - **Routing**: `useLocation` in `frontend/src/hooks.ts` strips and re-adds `import.meta.env.BASE_URL`
   so the app can live under `/<repo>/`. With the local build's base of `/` this is a no-op.
   `web/dist/404.html` is a copy of `index.html`, which is how Pages serves deep links.

@@ -9,14 +9,12 @@ import type {
   PreviewRequest,
   PreviewResponse,
   Privacy,
-  RunDetail,
-  RunSummary,
   StatusResponse,
   TrackView,
 } from "../api/types.ts";
 import { applyRun, type PlaylistWriter } from "../apply.ts";
 import { type Config, VERSION } from "../config.ts";
-import type { Run, Store } from "../db.ts";
+import type { Store } from "../db.ts";
 import { enrichPlaylist } from "../enrich/pipeline.ts";
 import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
@@ -32,8 +30,9 @@ import {
   signOut,
 } from "../youtube/auth.ts";
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
-import { musicLink, WATCH_VIDEOS, watchLinks } from "../youtube/watchLinks.ts";
+import { musicLink } from "../youtube/watchLinks.ts";
 import { JobBusyError, JobRunner } from "./jobs.ts";
+import { groupMusicLink, runDetail, runSummary, requireRun as sharedRequireRun } from "./runs.ts";
 import {
   asObject,
   dimensionOf,
@@ -128,34 +127,15 @@ export function createApp(deps: AppDeps) {
     return (deps.allowedHosts ?? []).includes(hostname);
   };
 
-  const runSummary = (run: Run): RunSummary => {
-    const groups = store.runGroupProgress(run.runId);
-    return {
-      runId: run.runId,
-      sourcePlaylistId: run.sourcePlaylistId,
-      sourceTitle: store.getPlaylist(run.sourcePlaylistId)?.title ?? run.sourcePlaylistId,
-      dimension: run.dimension,
-      status: run.status,
-      createdAt: run.createdAt,
-      quotaUsed: run.quotaUsed,
-      writesDone: run.writesDone,
-      groupCount: groups.length,
-      total: groups.reduce((sum, g) => sum + g.total, 0),
-      written: groups.reduce((sum, g) => sum + g.written, 0),
-    };
-  };
-
   const requirePlaylist = (id: string) => {
     const summary = store.listPlaylists().find((p) => p.playlistId === id);
     if (!summary) throw new HttpError(404, "Playlist not found. Add it first.");
     return summary;
   };
 
-  const requireRun = (id: string): Run => {
-    const run = store.getRun(Number(id));
-    if (!run) throw new HttpError(404, "Run not found");
-    return run;
-  };
+  const requireRun = (id: string) => sharedRequireRun(store, id);
+  // This shell can read YouTube's redirect; the static build passes undefined (see `musicLink`).
+  const musicLinks: typeof musicLink | undefined = musicLink;
 
   const youtube = (): YouTubeApi => {
     try {
@@ -195,7 +175,7 @@ export function createApp(deps: AppDeps) {
           sources: providerStatuses(config.env),
           dailyQuota: config.dailyQuota,
           sync: sync ? syncView(sync.status()) : null,
-          opensInMusic: true,
+          opensInMusic: musicLinks !== undefined,
         };
       },
     ],
@@ -365,42 +345,13 @@ export function createApp(deps: AppDeps) {
       },
     ],
     [
-      // Asking YouTube for the temporary playlist behind a watch_videos link, so it can be
-      // opened in YouTube Music. Only that one prefix is allowed through: the server must not
-      // become a way to make requests to anywhere else from this machine.
       "POST",
-      /^\/api\/music-link$/,
-      async (_p, body) => {
-        const req = asObject(await body());
-        if (typeof req.url !== "string" || !req.url.startsWith(WATCH_VIDEOS)) {
-          throw new HttpError(400, "url must be a YouTube watch_videos link");
-        }
-        try {
-          return { url: await musicLink(req.url) };
-        } catch (err) {
-          throw new HttpError(502, (err as Error).message);
-        }
-      },
+      /^\/api\/runs\/(\d+)\/groups\/(\d+)\/music-link$/,
+      async ([id = "", groupId = ""], body) =>
+        groupMusicLink(store, requireRun(id), groupId, await body(), musicLinks),
     ],
-    ["GET", /^\/api\/runs$/, () => store.listRuns().map(runSummary)],
-    [
-      "GET",
-      /^\/api\/runs\/(\d+)$/,
-      ([id = ""]): RunDetail => {
-        const run = requireRun(id);
-        return {
-          run: runSummary(run),
-          groups: store.runGroupProgress(run.runId).map((g) => ({
-            groupId: g.groupId,
-            name: g.name,
-            targetPlaylistId: g.targetPlaylistId,
-            total: g.total,
-            written: g.written,
-            watchLinks: watchLinks(store.groupItems(g.groupId).map((i) => i.videoId)),
-          })),
-        };
-      },
-    ],
+    ["GET", /^\/api\/runs$/, () => store.listRuns().map((r) => runSummary(store, r))],
+    ["GET", /^\/api\/runs\/(\d+)$/, ([id = ""]) => runDetail(store, requireRun(id))],
     [
       "DELETE",
       /^\/api\/runs\/(\d+)$/,

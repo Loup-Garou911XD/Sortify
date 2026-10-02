@@ -42,10 +42,7 @@ export function RunPage({ runId }: { runId: number }) {
     setError(undefined);
     setConfirming(false);
     try {
-      await startJob(`/api/runs/${runId}/apply`, {
-        privacy,
-        maxWrites: writeLimit,
-      });
+      await startJob(`/api/runs/${runId}/apply`, { privacy, maxWrites: writeLimit });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -243,10 +240,15 @@ export function RunPage({ runId }: { runId: number }) {
                     )}
                   </td>
                   <td>
-                    <span className="play-cell">
+                    <span className="link-row wide">
                       <WatchLinks name={g.name} links={g.watchLinks} />
-                      {status?.opensInMusic && g.watchLinks.length > 0 && (
-                        <MusicLinks name={g.name} links={g.watchLinks} />
+                      {status?.opensInMusic && (
+                        <MusicLinks
+                          runId={runId}
+                          groupId={g.groupId}
+                          name={g.name}
+                          parts={g.watchLinks.length}
+                        />
                       )}
                     </span>
                   </td>
@@ -259,20 +261,22 @@ export function RunPage({ runId }: { runId: number }) {
 
       {groups.some((g) => g.watchLinks.length > 0) && (
         <div className="hint play-note">
-          <p>
-            The <strong>Play without quota</strong> link opens a temporary playlist on YouTube, and
-            YouTube has no button to save it. YouTube Music has one,{" "}
-            {status?.opensInMusic
-              ? "and the Music link opens the same tracks there:"
-              : "but we cannot open it there directly from here. To do it by hand:"}
-          </p>
-          <ol>
-            {status?.opensInMusic ? (
-              <li>
-                Follow the <strong>Music</strong> link.
-              </li>
-            ) : (
-              <>
+          {status?.opensInMusic ? (
+            <>
+              <p>{playNoteLead} and the Music link opens the same tracks there:</p>
+              <ol>
+                <li>
+                  Follow the <strong>Music</strong> link.
+                </li>
+                {saveStep}
+              </ol>
+            </>
+          ) : (
+            <>
+              <p>
+                {playNoteLead} but we cannot open it there directly from here. To do it by hand:
+              </p>
+              <ol>
                 <li>
                   Follow a <strong>Play</strong> link.
                 </li>
@@ -280,13 +284,10 @@ export function RunPage({ runId }: { runId: number }) {
                   In the address bar, change <code>www.youtube.com</code> to{" "}
                   <code>music.youtube.com</code>, leaving the rest of the address alone.
                 </li>
-              </>
-            )}
-            <li>
-              Press <strong>Save</strong> above the queue. The untitled list gets saved in your
-              library, and it still costs no api quota.
-            </li>
-          </ol>
+                {saveStep}
+              </ol>
+            </>
+          )}
         </div>
       )}
 
@@ -318,6 +319,24 @@ export function RunPage({ runId }: { runId: number }) {
   );
 }
 
+const playNoteLead = (
+  <>
+    The <strong>Play without quota</strong> link opens a temporary playlist on YouTube, and YouTube
+    has no button to save it. YouTube Music has one,
+  </>
+);
+
+const saveStep = (
+  <li>
+    Press <strong>Save</strong> above the queue. The untitled list gets saved in your library, and
+    it still costs no api quota.
+  </li>
+);
+
+/** "Open X" for one link, "Open X, part 2 of 3" when a group needs several. */
+const partLabel = (text: string, i: number, parts: number) =>
+  parts === 1 ? text : `${text}, part ${i + 1} of ${parts}`;
+
 /**
  * The same lists, on YouTube Music.
  *
@@ -326,21 +345,32 @@ export function RunPage({ runId }: { runId: number }) {
  * empty on the click, which keeps it out of the popup blocker, and pointed somewhere once the
  * server has asked.
  */
-function MusicLinks({ name, links }: { name: string; links: string[] }) {
+function MusicLinks({
+  runId,
+  groupId,
+  name,
+  parts,
+}: {
+  runId: number;
+  groupId: number;
+  name: string;
+  parts: number;
+}) {
   const { notify } = useApp();
   const [busy, setBusy] = useState(-1);
+  if (parts === 0) return null;
 
-  const open = async (link: string, i: number) => {
+  const open = async (i: number) => {
     // No "noopener" here: that makes window.open return null, and the handle is the point.
     // Cutting the new tab's own back-reference instead, while it is still about:blank.
     const tab = window.open("", "_blank");
     if (tab) tab.opener = null;
     setBusy(i);
     try {
-      const { url } = await api<{ url: string }>("/api/music-link", {
-        method: "POST",
-        body: { url: link },
-      });
+      const { url } = await api<{ url: string }>(
+        `/api/runs/${runId}/groups/${groupId}/music-link`,
+        { method: "POST", body: { part: i + 1 } },
+      );
       if (tab) tab.location.href = url;
       else notify("error", "Allow pop-ups for this page to open YouTube Music.");
     } catch (e) {
@@ -353,18 +383,15 @@ function MusicLinks({ name, links }: { name: string; links: string[] }) {
 
   return (
     <span className="link-row">
-      {links.map((link, i) => (
+      {Array.from({ length: parts }, (_, i) => (
         <button
-          key={link}
+          // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positions, nothing else
+          key={i}
           type="button"
           className="link ext-link"
           disabled={busy >= 0}
-          aria-label={
-            links.length === 1
-              ? `Open ${name} in YouTube Music`
-              : `Open ${name} in YouTube Music, part ${i + 1} of ${links.length}`
-          }
-          onClick={() => void open(link, i)}
+          aria-label={partLabel(`Open ${name} in YouTube Music`, i, parts)}
+          onClick={() => void open(i)}
         >
           {busy === i ? <span className="spinner" aria-hidden /> : <IconMusic size={13} />}
           {i === 0 ? "Music" : i + 1}
@@ -394,7 +421,7 @@ function WatchLinks({ name, links }: { name: string; links: string[] }) {
           href={link}
           target="_blank"
           rel="noreferrer"
-          aria-label={`Play ${name}, part ${i + 1} of ${links.length}`}
+          aria-label={partLabel(`Play ${name}`, i, links.length)}
         >
           {i === 0 ? (
             <>
