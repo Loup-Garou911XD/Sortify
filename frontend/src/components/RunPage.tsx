@@ -4,7 +4,7 @@ import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
 import { IconArrowLeft, IconExternal, IconPlay, IconTrash } from "./icons.tsx";
-import { Button, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
+import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
 const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
@@ -15,6 +15,7 @@ export function RunPage({ runId }: { runId: number }) {
   const [maxWrites, setMaxWrites] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string>();
 
   if (detail.error)
@@ -48,13 +49,18 @@ export function RunPage({ runId }: { runId: number }) {
   };
 
   const remove = async () => {
+    setError(undefined);
+    setDeleting(true);
     try {
       await api(`/api/runs/${runId}`, { method: "DELETE" });
       notify("good", "Plan deleted.");
       refresh();
       navigate(`/playlists/${run.sourcePlaylistId}`);
     } catch (e) {
+      setConfirmDelete(false);
       setError((e as Error).message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -84,28 +90,10 @@ export function RunPage({ runId }: { runId: number }) {
         </div>
         {!applyingThis && (
           <div className="page-actions">
-            {confirmDelete ? (
-              <>
-                <span className="muted small" style={{ maxWidth: "46ch" }}>
-                  Delete this plan?
-                  {!neverApplied &&
-                    ` Its ${plural(created, "playlist")} stay on YouTube${
-                      run.status === "done" ? "" : ", and the rest can't be resumed"
-                    }.`}
-                </span>
-                <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                  Keep
-                </Button>
-                <Button variant="danger" onClick={remove}>
-                  Delete
-                </Button>
-              </>
-            ) : (
-              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
-                <IconTrash />
-                Delete plan
-              </Button>
-            )}
+            <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+              <IconTrash />
+              Delete plan
+            </Button>
           </div>
         )}
       </header>
@@ -260,6 +248,31 @@ export function RunPage({ runId }: { runId: number }) {
           </table>
         </div>
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this plan?"
+          confirmLabel="Delete plan"
+          variant="danger"
+          busy={deleting}
+          onConfirm={remove}
+          onCancel={() => setConfirmDelete(false)}
+        >
+          <p>
+            Sortify forgets this plan and its {plural(run.groupCount, "group")}. The playlist it was
+            made from, “{run.sourceTitle}”, and its tags are untouched.
+          </p>
+          {!neverApplied && (
+            <p>
+              The {plural(created, "playlist")} it has already created{" "}
+              {created === 1 ? "stays" : "stay"} on YouTube
+              {run.status === "done"
+                ? "."
+                : ", and the tracks it had not added yet cannot be resumed."}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
