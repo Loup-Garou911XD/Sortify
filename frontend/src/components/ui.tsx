@@ -129,6 +129,53 @@ export function TagChips({ tags, dimension }: { tags: TrackTagView[]; dimension:
   );
 }
 
+/**
+ * A modal yes or no. A native <dialog> brings the backdrop, the focus trap and Escape with it,
+ * and Escape lands on `onCancel` just like the Cancel button does. Cancel is also the first
+ * focusable control, so a stray Enter on an opening dialog never destroys anything.
+ */
+export function ConfirmDialog({
+  title,
+  confirmLabel,
+  variant = "primary",
+  busy = false,
+  onConfirm,
+  onCancel,
+  children,
+}: {
+  title: string;
+  confirmLabel: string;
+  variant?: "primary" | "danger";
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog ref={dialog} className="dialog" onClose={onCancel} aria-labelledby={titleId}>
+      <div className="dialog-head">
+        <h2 id={titleId}>{title}</h2>
+      </div>
+      <div className="dialog-body">{children}</div>
+      <div className="dialog-actions">
+        <Button variant="ghost" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant={variant} busy={busy} onClick={onConfirm}>
+          {confirmLabel}
+        </Button>
+      </div>
+    </dialog>
+  );
+}
+
 export function Segmented<T extends string>({
   value,
   options,

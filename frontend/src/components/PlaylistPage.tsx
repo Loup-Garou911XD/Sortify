@@ -6,7 +6,7 @@ import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
 import { IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
-import { Button, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
+import { Button, ConfirmDialog, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
 
 type Tab = "sort" | "tracks";
 
@@ -15,6 +15,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
   const detail = useResource<PlaylistDetail>(`/api/playlists/${playlistId}`, version);
   const [tab, setTab] = useState<Tab>("sort");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string>();
   const busy = job?.status === "running";
   const running = busy && job?.playlistId === playlistId ? job : null;
@@ -35,6 +36,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
 
   const remove = async () => {
     setError(undefined);
+    setDeleting(true);
     try {
       await api(`/api/playlists/${playlistId}`, { method: "DELETE" });
       notify("good", `Removed "${playlist.title}".`);
@@ -43,6 +45,8 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
     } catch (err) {
       setConfirmDelete(false);
       setError((err as Error).message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -77,31 +81,15 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           </p>
         </div>
         <div className="page-actions">
-          {confirmDelete ? (
-            <>
-              <span className="muted small" style={{ maxWidth: "52ch" }}>
-                Forget this playlist and its {plural(playlist.total, "track")}
-                {plans.length > 0 && `, along with ${plural(plans.length, "plan")} made from it`}?
-                Playlists already created on YouTube stay.
-              </span>
-              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>
-                Keep
-              </Button>
-              <Button variant="danger" onClick={remove}>
-                Delete
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="ghost"
-              disabled={busy}
-              title={busy ? "Wait for the current task to finish" : undefined}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <IconTrash />
-              Delete
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            disabled={busy}
+            title={busy ? "Wait for the current task to finish" : undefined}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <IconTrash />
+            Delete
+          </Button>
           <Button
             variant="ghost"
             disabled={busy || !status?.signedIn}
@@ -227,6 +215,27 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           <TracksTable tracks={tracks} />
         )}
       </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete “${playlist.title}”?`}
+          confirmLabel="Delete playlist"
+          variant="danger"
+          busy={deleting}
+          onConfirm={remove}
+          onCancel={() => setConfirmDelete(false)}
+        >
+          <p>
+            Sortify forgets this playlist, along with the tags on the{" "}
+            {plural(playlist.total, "track")} no other playlist holds
+            {plans.length > 0 && <>, and {plural(plans.length, "plan")} made from it</>}.
+          </p>
+          <p>
+            Nothing on YouTube changes: this playlist stays in your account, and so does every
+            playlist Sortify has already created from it.
+          </p>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
