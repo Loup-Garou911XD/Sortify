@@ -21,6 +21,8 @@ interface Draft {
 
 const LEFTOVERS = new Set(["Other", "Unsorted"]);
 const PREVIEW_ROWS = 4;
+/** How many more tracks one "Show more" reveals. */
+const MORE_ROWS = 10;
 
 const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "subgenre", label: "Subgenre" },
@@ -47,7 +49,8 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   const [basis, setBasis] = useState<{ dimension: Dimension; minSize: number }>();
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [edited, setEdited] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // How many tracks each group card shows, by draft key. Missing means the first few.
+  const [shownRows, setShownRows] = useState<Map<string, number>>(new Map());
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
@@ -85,7 +88,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
           })),
         );
         setEdited(false);
-        setExpanded(new Set());
+        setShownRows(new Map());
         setError(undefined);
       })
       .catch((e: Error) => live && setError(e.message));
@@ -284,8 +287,9 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
           ) : (
             <div className="groups">
               {drafts.map((d) => {
-                const open = expanded.has(d.key);
-                const shown = open ? d.videoIds : d.videoIds.slice(0, PREVIEW_ROWS);
+                const rows = shownRows.get(d.key) ?? PREVIEW_ROWS;
+                const shown = d.videoIds.slice(0, rows);
+                const hidden = d.videoIds.length - shown.length;
                 const cls = ["group", d.included ? "" : "excluded", d.leftover ? "leftover" : ""]
                   .filter(Boolean)
                   .join(" ");
@@ -352,17 +356,15 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                       <button
                         type="button"
                         className="link small"
-                        aria-expanded={open}
                         onClick={() =>
-                          setExpanded((s) => {
-                            const next = new Set(s);
-                            if (open) next.delete(d.key);
-                            else next.add(d.key);
-                            return next;
-                          })
+                          setShownRows((m) =>
+                            new Map(m).set(d.key, hidden > 0 ? rows + MORE_ROWS : PREVIEW_ROWS),
+                          )
                         }
                       >
-                        {open ? "Show fewer" : `Show all ${fmt(d.videoIds.length)}`}
+                        {hidden > 0
+                          ? `Show ${fmt(Math.min(MORE_ROWS, hidden))} more`
+                          : "Show fewer"}
                       </button>
                     )}
                   </article>
