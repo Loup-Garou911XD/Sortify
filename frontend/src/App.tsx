@@ -73,6 +73,7 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setTheme] = useTheme();
   const lastJobStatus = useRef<string | null>(null);
+  const lastDone = useRef<number | null>(null);
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -93,6 +94,12 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
   const pollJob = useCallback(async () => {
     const current = await api<JobView | null>("/api/job").catch(() => null);
     setJob(current);
+    // Every track a task finishes changes the counts an open page shows, so follow the task's
+    // own progress: on a timer the tag coverage sits visibly behind the number in the job bar,
+    // which is read eight times as often.
+    const done = current?.status === "running" ? (current.progress?.done ?? null) : null;
+    if (done !== null && done !== lastDone.current) refresh();
+    lastDone.current = done;
     // Refresh everything once when a task finishes.
     if (lastJobStatus.current === "running" && current?.status !== "running") refresh();
     lastJobStatus.current = current?.status ?? null;
@@ -102,8 +109,8 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
     void pollJob();
   }, [pollJob]);
   useInterval(() => void pollJob(), 800, job?.status === "running");
-  // Keep progress numbers in the sidebar moving while a task runs.
-  useInterval(refresh, 4000, job?.status === "running");
+  // Reading a playlist reports no progress to follow, so that one still needs a timer.
+  useInterval(refresh, 4000, job?.status === "running" && !job.progress);
 
   // A sync can bring in work from another device while this page sits open. Poll for that
   // narrowly and refresh only when something actually arrived: a blanket refresh would rebuild
