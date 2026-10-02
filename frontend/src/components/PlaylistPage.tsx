@@ -6,12 +6,13 @@ import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
 import { IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
-import { Button, ConfirmDialog, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
+import { Button, ConfirmDialog, InfoTip, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
 
 type Tab = "sort" | "tracks";
 
 export function PlaylistPage({ playlistId }: { playlistId: string }) {
-  const { version, job, status, startJob, navigate, refresh, notify, runs } = useApp();
+  const { version, job, status, startJob, navigate, refresh, notify, runs, configureSource } =
+    useApp();
   const detail = useResource<PlaylistDetail>(`/api/playlists/${playlistId}`, version);
   const [tab, setTab] = useState<Tab>("sort");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -110,6 +111,48 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           >
             Re-tag all
           </Button>
+          {missingSources.length > 0 && untagged > 0 && (
+            <InfoTip
+              tone="warn"
+              label={`${plural(missingSources.length, "tag source")} off, so tracks will miss tags`}
+            >
+              <strong>
+                {missingSources.length === status?.sources.length
+                  ? "No tag source is configured,"
+                  : `${plural(missingSources.length, "tag source")} off,`}
+              </strong>{" "}
+              so tracks will miss their tags.
+              <ul>
+                {missingSources.map((s) => (
+                  <li key={s.id}>
+                    <strong>{s.label}:</strong> {s.help}
+                    {!configureSource && (
+                      <>
+                        {" "}
+                        Set{" "}
+                        {s.envVars.map((v, i) => (
+                          <span key={v}>
+                            {i > 0 && " and "}
+                            <code>{v}</code>
+                          </span>
+                        ))}
+                        .
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="infotip-foot">
+                {configureSource ? (
+                  "Add their keys under Connections, in the top bar."
+                ) : (
+                  <>
+                    Then restart <code>sortify ui</code>.
+                  </>
+                )}
+              </p>
+            </InfoTip>
+          )}
           <Button
             variant="primary"
             disabled={busy || untagged === 0}
@@ -127,28 +170,6 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           Tagging tracks
           {running.progress && ` — ${fmt(running.progress.done)} of ${fmt(running.progress.total)}`}
           . You can keep working; this page updates when it finishes.
-        </Notice>
-      )}
-      {missingSources.length > 0 && untagged > 0 && (
-        <Notice tone="warn">
-          <strong>Some tag sources are off,</strong> so tracks will miss their tags:
-          <ul className="notice-list">
-            {missingSources.map((s) => (
-              <li key={s.id}>
-                <strong>{s.label}</strong> — {s.help} Set{" "}
-                {s.envVars.map((v, i) => (
-                  <span key={v}>
-                    {i > 0 && " and "}
-                    <code>{v}</code>
-                  </span>
-                ))}
-                .
-              </li>
-            ))}
-          </ul>
-          <div style={{ marginTop: 7 }}>
-            Then restart <code>sortify ui</code>.
-          </div>
         </Notice>
       )}
 

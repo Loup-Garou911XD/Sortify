@@ -176,6 +176,43 @@ export function ConfirmDialog({
   );
 }
 
+/**
+ * A small icon that reveals its detail on hover. It is a real button, not a bare glyph, so the
+ * keyboard reaches it (`:focus-within`) and a tap opens it where there is no hover at all.
+ */
+export function InfoTip({
+  label,
+  tone = "info",
+  children,
+}: {
+  label: string;
+  tone?: "info" | "warn";
+  children: ReactNode;
+}) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const Glyph = tone === "warn" ? IconAlert : IconInfo;
+
+  return (
+    <span className={`infotip infotip-${tone}${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="infotip-trigger"
+        aria-label={label}
+        aria-expanded={open}
+        aria-describedby={id}
+        onClick={() => setOpen((v) => !v)}
+        onBlur={() => setOpen(false)}
+      >
+        <Glyph size={15} />
+      </button>
+      <span className="infotip-pop" role="tooltip" id={id}>
+        {children}
+      </span>
+    </span>
+  );
+}
+
 export function Segmented<T extends string>({
   value,
   options,

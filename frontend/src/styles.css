@@ -869,6 +869,84 @@ li:hover > .row-btn,
   }
 }
 
+/* ---------- info tip ---------- */
+
+.infotip {
+  position: relative;
+  display: inline-flex;
+}
+.infotip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: none;
+  color: var(--ink-3);
+  cursor: help;
+}
+.infotip-warn .infotip-trigger {
+  background: var(--warn-tint);
+  color: var(--warn);
+}
+.infotip-trigger:hover,
+.infotip-trigger:focus-visible {
+  border-color: var(--line-2);
+}
+.infotip-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: min(330px, calc(100vw - 32px));
+  padding: 11px 13px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-2);
+  background: var(--panel);
+  color: var(--ink-2);
+  box-shadow: var(--shadow-2);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+}
+.infotip:hover .infotip-pop,
+.infotip:focus-within .infotip-pop,
+.infotip.open .infotip-pop {
+  opacity: 1;
+  visibility: visible;
+}
+.infotip-pop ul {
+  margin: 7px 0 0;
+  padding-left: 17px;
+  display: grid;
+  gap: 6px;
+}
+.infotip-foot {
+  margin: 8px 0 0;
+}
+.infotip-pop code {
+  background: rgb(127 127 127 / 16%);
+  border-color: transparent;
+}
+/* Too narrow to hang off the trigger: dock it to the bottom of the screen instead. */
+@media (max-width: 560px) {
+  .infotip-pop {
+    position: fixed;
+    inset: auto 12px 12px;
+    width: auto;
+    max-width: none;
+  }
+}
+
 /* ---------- chips and pills ---------- */
 
 .chips {
