@@ -234,6 +234,21 @@ input[type="checkbox"] {
   font-size: 12.5px;
   margin: 8px 0 0;
 }
+/* A footnote under the plan's table, wide enough to read but not the width of the page. */
+.play-note {
+  max-width: 78ch;
+  line-height: 1.55;
+  margin-top: 14px;
+}
+.play-note p {
+  margin: 0;
+}
+.play-note ol {
+  margin: 7px 0 0;
+  padding-left: 19px;
+  display: grid;
+  gap: 4px;
+}
 .field-error {
   color: var(--bad);
   font-size: 12.5px;
