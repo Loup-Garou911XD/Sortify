@@ -9,9 +9,11 @@ import type {
   PreviewResponse,
   RunDetail,
   StatusResponse,
+  SyncView,
 } from "../src/api/types.ts";
 import { Store } from "../src/db.ts";
 import { type AppDeps, createApp, type YouTubeApi } from "../src/server/app.ts";
+import type { SyncEngine } from "../src/sync/engine.ts";
 import { PendingAuthStore } from "../src/youtube/auth.ts";
 import { tempDir, testConfig } from "./helpers.ts";
 
@@ -156,6 +158,26 @@ describe("api", () => {
     ]);
     expect(body.sources[2]).toMatchObject({ label: "Last.fm", envVars: ["LASTFM_API_KEY"] });
     expect(body.signedIn).toBe(false);
+  });
+
+  it("syncs on demand, or says sync is off", async () => {
+    const off = await setup();
+    expect((await off.api("/api/sync", { method: "POST" })).status).toBe(409);
+
+    let cycles = 0;
+    const sync = {
+      sync: async () => {
+        cycles++;
+        return { state: "idle", at: "2026-01-01T00:00:00.000Z" };
+      },
+      status: () => ({ state: "idle", at: "2026-01-01T00:00:00.000Z" }),
+      schedule: () => {},
+    } as unknown as SyncEngine;
+    const { api } = await setup({ sync });
+    const { status, body } = await api<SyncView>("/api/sync", { method: "POST" });
+    expect(status).toBe(200);
+    expect(cycles).toBe(1);
+    expect(body).toMatchObject({ state: "idle", changed: false });
   });
 
   it("lists playlists with tag coverage and returns tracks with tags", async () => {

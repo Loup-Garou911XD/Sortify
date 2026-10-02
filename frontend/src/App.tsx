@@ -41,6 +41,8 @@ export interface AppState {
   /** POSTs an action that starts a background task and begins tracking it. */
   startJob: (path: string, body?: unknown) => Promise<void>;
   openSignIn: () => void;
+  /** Runs a Drive sync now and refreshes if it brought anything in. */
+  syncNow: () => Promise<void>;
   notify: (tone: Tone, text: string) => void;
   /**
    * Set only by shells that keep their own keys — the static build, where there is no `.env`.
@@ -119,16 +121,25 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
   // loaded still triggers a refresh even if it landed before the first status read.
   const mergedAt = useRef<string | null>(null);
   const [sync, setSync] = useState<SyncView | null>(null);
+  const takeSync = useCallback(
+    (view: SyncView | null) => {
+      // Always take the latest state: the panel would otherwise keep showing whatever the first
+      // status read happened to catch, which is "syncing" more often than not.
+      setSync(view);
+      if (!view?.changed || view.at === mergedAt.current) return;
+      mergedAt.current = view.at;
+      refresh();
+    },
+    [refresh],
+  );
   const checkSync = useCallback(async () => {
     const current = await api<StatusResponse>("/api/status").catch(() => null);
-    if (!current) return;
-    // Always take the latest state: the panel would otherwise keep showing whatever the first
-    // status read happened to catch, which is "syncing" more often than not.
-    setSync(current.sync);
-    if (!current.sync?.changed || current.sync.at === mergedAt.current) return;
-    mergedAt.current = current.sync.at;
-    refresh();
-  }, [refresh]);
+    if (current) takeSync(current.sync);
+  }, [takeSync]);
+  const syncNow = useCallback(async () => {
+    setSync((s) => (s ? { ...s, state: "syncing" } : s));
+    takeSync(await api<SyncView>("/api/sync", { method: "POST" }));
+  }, [takeSync]);
   useEffect(() => {
     void checkSync();
   }, [checkSync]);
@@ -170,6 +181,7 @@ export function App({ configureSource }: { configureSource?: (id: string) => voi
     refresh,
     startJob,
     openSignIn: () => setSignInOpen(true),
+    syncNow,
     notify,
     configureSource,
   };

@@ -366,9 +366,17 @@ export function Menu({
   );
 }
 
-export function MenuItem({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+export function MenuItem({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <button type="button" className="menu-item" onClick={onClick}>
+    <button type="button" className="menu-item" onClick={onClick} disabled={disabled}>
       {children}
     </button>
   );

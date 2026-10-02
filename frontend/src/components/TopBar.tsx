@@ -9,6 +9,7 @@ import {
   IconMenu,
   IconMonitor,
   IconMoon,
+  IconRefresh,
   IconSignIn,
   IconSignOut,
   IconSun,
@@ -138,8 +139,18 @@ export function TopBar({
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
-  const { status, sync, theme, setTheme, openSignIn, refresh, notify, navigate, configureSource } =
-    useApp();
+  const {
+    status,
+    sync,
+    theme,
+    setTheme,
+    openSignIn,
+    syncNow,
+    refresh,
+    notify,
+    navigate,
+    configureSource,
+  } = useApp();
   const [signingOut, setSigningOut] = useState(false);
 
   const sources = status?.sources ?? [];
@@ -162,6 +173,14 @@ export function TopBar({
       notify("error", (err as Error).message);
     } finally {
       setSigningOut(false);
+    }
+  };
+
+  const manualSync = async () => {
+    try {
+      await syncNow();
+    } catch (err) {
+      notify("error", (err as Error).message);
     }
   };
 
@@ -280,6 +299,22 @@ export function TopBar({
                         }
                       />
                     </ul>
+                    {sync.state !== "needs-auth" && (
+                      <MenuItem
+                        disabled={sync.state === "syncing"}
+                        onClick={() => {
+                          close();
+                          void manualSync();
+                        }}
+                      >
+                        {sync.state === "syncing" ? (
+                          <span className="spinner" aria-hidden />
+                        ) : (
+                          <IconRefresh size={15} />
+                        )}
+                        Sync now
+                      </MenuItem>
+                    )}
                   </>
                 )}
 

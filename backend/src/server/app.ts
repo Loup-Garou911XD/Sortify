@@ -10,6 +10,7 @@ import type {
   PreviewResponse,
   Privacy,
   StatusResponse,
+  SyncView,
   TrackView,
 } from "../api/types.ts";
 import { applyRun, type PlaylistWriter } from "../apply.ts";
@@ -177,6 +178,15 @@ export function createApp(deps: AppDeps) {
           sync: sync ? syncView(sync.status()) : null,
           opensInMusic: musicLinks !== undefined,
         };
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/sync$/,
+      async (): Promise<SyncView> => {
+        if (!sync)
+          throw new HttpError(409, "Sync is off. Connect YouTube to sync through Google Drive.");
+        return syncView(await sync.sync());
       },
     ],
     [

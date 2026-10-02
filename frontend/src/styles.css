@@ -749,8 +749,12 @@ li:hover > .row-btn,
   text-align: left;
   cursor: pointer;
 }
-.menu-item:hover {
+.menu-item:hover:not(:disabled) {
   background: var(--panel-2);
+}
+.menu-item:disabled {
+  color: var(--ink-2);
+  cursor: default;
 }
 .menu-sep {
   height: 1px;

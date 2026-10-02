@@ -15,6 +15,7 @@ import type {
   PreviewRequest,
   PreviewResponse,
   StatusResponse,
+  SyncView,
   TrackView,
 } from "../../backend/src/api/types.ts";
 import { applyRun, type Privacy } from "../../backend/src/apply.ts";
@@ -144,6 +145,15 @@ const routes: [string, RegExp, Handler][] = [
       sync: sync ? syncView(sync.status()) : null,
       opensInMusic: musicLinks !== undefined,
     }),
+  ],
+  [
+    "POST",
+    /^\/api\/sync$/,
+    async (): Promise<SyncView> => {
+      if (!sync)
+        throw new RequestError(409, "Sync is off. Connect YouTube to sync through Google Drive.");
+      return syncView(await sync.sync());
+    },
   ],
   ["POST", /^\/api\/auth\/start$/, async () => ({ url: await startAuth() })],
   [
