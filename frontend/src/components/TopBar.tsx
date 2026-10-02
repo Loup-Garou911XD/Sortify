@@ -16,18 +16,24 @@ import {
 import { Button, Menu, MenuItem } from "./ui.tsx";
 
 /**
+ * How a connection reads at a glance: working, not set up, busy, or broken. The dot and the
+ * spinning ring in the top bar are the same four, so the trigger and the panel never disagree.
+ */
+type Tone = "on" | "off" | "sync" | "bad";
+
+/**
  * One row of the Connections panel. It is a plain block normally, and a button when the shell
  * passed `configureSource`, so the local app shows exactly what it always has.
  */
 function SourceRow({
-  on,
+  tone,
   name,
   state,
   help,
   keys = [],
   onClick,
 }: {
-  on: boolean;
+  tone: Tone;
   name: string;
   state?: string;
   help: string;
@@ -36,7 +42,7 @@ function SourceRow({
 }) {
   const body = (
     <>
-      <span className={on ? "dot dot-on" : "dot dot-off"} aria-hidden />
+      <span className={`dot dot-${tone}`} aria-hidden />
       <div>
         <div className="source-name">
           {name}
@@ -54,7 +60,7 @@ function SourceRow({
     </>
   );
   return (
-    <li className={on ? "source-row-item on" : "source-row-item"}>
+    <li className={tone === "on" ? "source-row-item on" : "source-row-item"}>
       {onClick ? (
         <button type="button" className="source-row source-row-button" onClick={onClick}>
           {body}
@@ -72,6 +78,33 @@ const SYNC_LABEL = {
   offline: "Not reachable",
   "needs-auth": "Needs sign-in",
 } as const;
+
+const SYNC_TONE = {
+  idle: "on",
+  syncing: "sync",
+  offline: "bad",
+  "needs-auth": "bad",
+} as const satisfies Record<SyncView["state"], Tone>;
+
+/** The dot's own wording. Short on purpose: the panel below carries the detail and the fix. */
+const SYNC_DOT_TEXT = {
+  idle: "Up to date with Google Drive",
+  syncing: "Syncing with Google Drive\u2026",
+  offline: "Google Drive is not reachable",
+  "needs-auth": "Google Drive needs you to sign in again",
+} as const satisfies Record<SyncView["state"], string>;
+
+/**
+ * The one dot in the top bar. Anything but a settled sync wins, so a broken or in-flight Drive
+ * shows through; being signed out comes last, because it is a step not taken yet, not a fault.
+ */
+function connection(signedIn: boolean, sync: SyncView | null): { tone: Tone; text: string } {
+  if (sync && SYNC_TONE[sync.state] !== "on") {
+    return { tone: SYNC_TONE[sync.state], text: SYNC_DOT_TEXT[sync.state] };
+  }
+  if (signedIn) return { tone: "on", text: sync ? SYNC_DOT_TEXT.idle : "YouTube connected" };
+  return { tone: "off", text: "Not connected" };
+}
 
 /** What the Drive row says under its name: the problem if there is one, else what it does. */
 function syncHelp(sync: SyncView): string {
@@ -112,6 +145,8 @@ export function TopBar({
   const sources = status?.sources ?? [];
   const ready = sources.filter((s) => s.configured).length;
   const signedIn = status?.signedIn ?? false;
+
+  const conn = connection(signedIn, sync);
 
   const now = THEMES[theme];
   const next = THEMES[now.next];
@@ -164,11 +199,11 @@ export function TopBar({
       <div className="topbar-right">
         {status && (
           <Menu
-            label="Connections"
+            label={`Connections: ${conn.text}`}
             wide
             trigger={
               <>
-                <span className={signedIn ? "dot dot-on" : "dot dot-off"} aria-hidden />
+                <span className={`dot dot-${conn.tone}`} title={conn.text} aria-hidden />
                 <span className="trigger-word">Connections</span>
               </>
             }
@@ -181,7 +216,7 @@ export function TopBar({
                 </div>
                 <ul className="source-list">
                   <SourceRow
-                    on={signedIn}
+                    tone={signedIn ? "on" : "off"}
                     name="YouTube"
                     help={
                       signedIn
@@ -232,7 +267,7 @@ export function TopBar({
                     </div>
                     <ul className="source-list">
                       <SourceRow
-                        on={sync.state === "idle"}
+                        tone={SYNC_TONE[sync.state]}
                         name="Google Drive"
                         help={syncHelp(sync)}
                         onClick={
@@ -260,7 +295,7 @@ export function TopBar({
                   {sources.map((s) => (
                     <SourceRow
                       key={s.id}
-                      on={s.configured}
+                      tone={s.configured ? "on" : "off"}
                       name={s.label}
                       state={s.configured ? "Ready" : "Off"}
                       help={s.help}
