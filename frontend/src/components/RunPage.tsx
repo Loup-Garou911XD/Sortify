@@ -1,41 +1,18 @@
-import { useState } from 'react';
-import type { Privacy, RunDetail } from '../../../backend/src/api/types.ts';
-import { useApp } from '../App.tsx';
-import { api } from '../api.ts';
-import { fmt, plural, quotaFor, timeAgo, useResource } from '../hooks.ts';
-import {
-  IconArrowLeft,
-  IconExternal,
-  IconMusic,
-  IconPlay,
-  IconTrash,
-} from './icons.tsx';
-import {
-  Button,
-  ConfirmDialog,
-  Field,
-  Notice,
-  PageSkeleton,
-  Progress,
-  StatusPill,
-} from './ui.tsx';
+import { useState } from "react";
+import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
+import { useApp } from "../App.tsx";
+import { api } from "../api.ts";
+import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
+import { IconArrowLeft, IconExternal, IconMusic, IconPlay, IconTrash } from "./icons.tsx";
+import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
-const BY = { subgenre: 'subgenre', mood: 'mood', type: 'song type' } as const;
+const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function RunPage({ runId }: { runId: number }) {
-  const {
-    version,
-    job,
-    status,
-    startJob,
-    navigate,
-    refresh,
-    openSignIn,
-    notify,
-  } = useApp();
+  const { version, job, status, startJob, navigate, refresh, openSignIn, notify } = useApp();
   const detail = useResource<RunDetail>(`/api/runs/${runId}`, version);
-  const [privacy, setPrivacy] = useState<Privacy>('private');
-  const [maxWrites, setMaxWrites] = useState('');
+  const [privacy, setPrivacy] = useState<Privacy>("private");
+  const [maxWrites, setMaxWrites] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -50,9 +27,8 @@ export function RunPage({ runId }: { runId: number }) {
   if (!detail.data) return <PageSkeleton label="Loading the plan" />;
 
   const { run, groups } = detail.data;
-  const busy = job?.status === 'running';
-  const applyingThis =
-    busy && job?.kind === 'apply' && job.runId === runId ? job : null;
+  const busy = job?.status === "running";
+  const applyingThis = busy && job?.kind === "apply" && job.runId === runId ? job : null;
   const written = applyingThis?.progress?.done ?? run.written;
   const total = applyingThis?.progress?.total ?? run.total;
   const toCreate = groups.filter((g) => g.targetPlaylistId === null).length;
@@ -60,8 +36,7 @@ export function RunPage({ runId }: { runId: number }) {
   const pending = run.total - run.written;
   const quota = quotaFor(toCreate, pending, status?.dailyQuota ?? 10_000);
   const neverApplied = groups.every((g) => g.targetPlaylistId === null);
-  const writeLimit =
-    Number(maxWrites) > 0 ? Math.floor(Number(maxWrites)) : undefined;
+  const writeLimit = Number(maxWrites) > 0 ? Math.floor(Number(maxWrites)) : undefined;
 
   const apply = async () => {
     setError(undefined);
@@ -80,8 +55,8 @@ export function RunPage({ runId }: { runId: number }) {
     setError(undefined);
     setDeleting(true);
     try {
-      await api(`/api/runs/${runId}`, { method: 'DELETE' });
-      notify('good', 'Plan deleted.');
+      await api(`/api/runs/${runId}`, { method: "DELETE" });
+      notify("good", "Plan deleted.");
       refresh();
       navigate(`/playlists/${run.sourcePlaylistId}`);
     } catch (e) {
@@ -101,19 +76,15 @@ export function RunPage({ runId }: { runId: number }) {
     <div className="page">
       <header className="page-header">
         <div className="page-heading">
-          <a
-            className="back-link"
-            href={`/playlists/${run.sourcePlaylistId}`}
-            onClick={openSource}
-          >
+          <a className="back-link" href={`/playlists/${run.sourcePlaylistId}`} onClick={openSource}>
             <IconArrowLeft />
             {run.sourceTitle}
           </a>
           <h1>
-            {plural(run.groupCount, 'playlist')} by {BY[run.dimension]}
+            {plural(run.groupCount, "playlist")} by {BY[run.dimension]}
           </h1>
           <p className="meta">
-            <StatusPill status={applyingThis ? 'applying' : run.status} />
+            <StatusPill status={applyingThis ? "applying" : run.status} />
             <span className="sep">·</span>
             <span>planned {timeAgo(run.createdAt)}</span>
             <span className="sep">·</span>
@@ -142,31 +113,26 @@ export function RunPage({ runId }: { runId: number }) {
           </div>
           <div className="run-figure">
             <strong>
-              {fmt(created)}{' '}
-              <span className="muted">/ {fmt(groups.length)}</span>
+              {fmt(created)} <span className="muted">/ {fmt(groups.length)}</span>
             </strong>
             <span className="eyebrow">Playlists created</span>
           </div>
         </div>
-        <Progress
-          value={written}
-          max={total}
-          tone={run.status === 'done' ? 'good' : 'accent'}
-        />
+        <Progress value={written} max={total} tone={run.status === "done" ? "good" : "accent"} />
         {applyingThis && (
           <p className="muted small" style={{ margin: 0 }}>
-            {applyingThis.log.at(-1) ?? 'Starting…'}
+            {applyingThis.log.at(-1) ?? "Starting…"}
           </p>
         )}
       </section>
 
-      {run.status !== 'done' && !applyingThis && (
+      {run.status !== "done" && !applyingThis && (
         <section className="panel" aria-label="Create playlists">
           {!status?.signedIn ? (
             <Notice tone="warn">
               <button type="button" className="link" onClick={openSignIn}>
                 Connect YouTube
-              </button>{' '}
+              </button>{" "}
               to create these playlists.
             </Notice>
           ) : confirming ? (
@@ -174,28 +140,22 @@ export function RunPage({ runId }: { runId: number }) {
               <p>
                 {toCreate > 0 && (
                   <>
-                    Create{' '}
-                    <strong>{plural(toCreate, `${privacy} playlist`)}</strong>{' '}
-                    and add{' '}
+                    Create <strong>{plural(toCreate, `${privacy} playlist`)}</strong> and add{" "}
                   </>
                 )}
-                {toCreate === 0 && 'Add '}
-                <strong>{plural(pending, 'track')}</strong>
-                {writeLimit
-                  ? `, stopping after ${plural(writeLimit, 'write')}`
-                  : ''}
-                . This uses about {fmt(quota.units)} of your{' '}
-                {fmt(status.dailyQuota)} daily quota units
-                {quota.days > 1 && `, so it will take about ${quota.days} days`}
-                . If the quota runs out, the plan pauses and you can resume it
-                after midnight Pacific time.
+                {toCreate === 0 && "Add "}
+                <strong>{plural(pending, "track")}</strong>
+                {writeLimit ? `, stopping after ${plural(writeLimit, "write")}` : ""}. This uses
+                about {fmt(quota.units)} of your {fmt(status.dailyQuota)} daily quota units
+                {quota.days > 1 && `, so it will take about ${quota.days} days`}. If the quota runs
+                out, the plan pauses and you can resume it after midnight Pacific time.
               </p>
               <div className="confirm-actions">
                 <Button variant="ghost" onClick={() => setConfirming(false)}>
                   Cancel
                 </Button>
                 <Button variant="primary" onClick={apply}>
-                  {run.status === 'planned' ? 'Create playlists' : 'Resume'}
+                  {run.status === "planned" ? "Create playlists" : "Resume"}
                 </Button>
               </div>
             </div>
@@ -227,10 +187,10 @@ export function RunPage({ runId }: { runId: number }) {
               <Button
                 variant="primary"
                 disabled={busy}
-                title={busy ? 'Wait for the current task to finish' : undefined}
+                title={busy ? "Wait for the current task to finish" : undefined}
                 onClick={() => setConfirming(true)}
               >
-                {run.status === 'planned' ? 'Create playlists…' : 'Resume…'}
+                {run.status === "planned" ? "Create playlists…" : "Resume…"}
               </Button>
             </div>
           )}
@@ -261,7 +221,7 @@ export function RunPage({ runId }: { runId: number }) {
                       <Progress
                         value={g.written}
                         max={g.total}
-                        tone={g.written === g.total ? 'good' : 'accent'}
+                        tone={g.written === g.total ? "good" : "accent"}
                         label={`${g.name} added`}
                       />
                       <span>{fmt(g.written)}</span>
@@ -300,12 +260,11 @@ export function RunPage({ runId }: { runId: number }) {
       {groups.some((g) => g.watchLinks.length > 0) && (
         <div className="hint play-note">
           <p>
-            The <strong>Play without quota</strong> link opens a temporary
-            playlist on YouTube, and YouTube has no button to save it. YouTube
-            Music has one,{' '}
+            The <strong>Play without quota</strong> link opens a temporary playlist on YouTube, and
+            YouTube has no button to save it. YouTube Music has one,{" "}
             {status?.opensInMusic
-              ? 'and the Music link opens the same tracks there:'
-              : 'but we cannot open it there directly from here. To do it by hand:'}
+              ? "and the Music link opens the same tracks there:"
+              : "but we cannot open it there directly from here. To do it by hand:"}
           </p>
           <ol>
             {status?.opensInMusic ? (
@@ -318,15 +277,14 @@ export function RunPage({ runId }: { runId: number }) {
                   Follow a <strong>Play</strong> link.
                 </li>
                 <li>
-                  In the address bar, change <code>www.youtube.com</code> to{' '}
-                  <code>music.youtube.com</code>, leaving the rest of the
-                  address alone.
+                  In the address bar, change <code>www.youtube.com</code> to{" "}
+                  <code>music.youtube.com</code>, leaving the rest of the address alone.
                 </li>
               </>
             )}
             <li>
-              Press <strong>Save</strong> above the queue. The untitled list
-              gets saved in your library, and it still costs no api quota.
+              Press <strong>Save</strong> above the queue. The untitled list gets saved in your
+              library, and it still costs no api quota.
             </li>
           </ol>
         </div>
@@ -342,17 +300,16 @@ export function RunPage({ runId }: { runId: number }) {
           onCancel={() => setConfirmDelete(false)}
         >
           <p>
-            Sortify forgets this plan and its {plural(run.groupCount, 'group')}.
-            The playlist it was made from, “{run.sourceTitle}”, and its tags are
-            untouched.
+            Sortify forgets this plan and its {plural(run.groupCount, "group")}. The playlist it was
+            made from, “{run.sourceTitle}”, and its tags are untouched.
           </p>
           {!neverApplied && (
             <p>
-              The {plural(created, 'playlist')} it has already created{' '}
-              {created === 1 ? 'stays' : 'stay'} on YouTube
-              {run.status === 'done'
-                ? '.'
-                : ', and the tracks it had not added yet cannot be resumed.'}
+              The {plural(created, "playlist")} it has already created{" "}
+              {created === 1 ? "stays" : "stay"} on YouTube
+              {run.status === "done"
+                ? "."
+                : ", and the tracks it had not added yet cannot be resumed."}
             </p>
           )}
         </ConfirmDialog>
@@ -376,20 +333,19 @@ function MusicLinks({ name, links }: { name: string; links: string[] }) {
   const open = async (link: string, i: number) => {
     // No "noopener" here: that makes window.open return null, and the handle is the point.
     // Cutting the new tab's own back-reference instead, while it is still about:blank.
-    const tab = window.open('', '_blank');
+    const tab = window.open("", "_blank");
     if (tab) tab.opener = null;
     setBusy(i);
     try {
-      const { url } = await api<{ url: string }>('/api/music-link', {
-        method: 'POST',
+      const { url } = await api<{ url: string }>("/api/music-link", {
+        method: "POST",
         body: { url: link },
       });
       if (tab) tab.location.href = url;
-      else
-        notify('error', 'Allow pop-ups for this page to open YouTube Music.');
+      else notify("error", "Allow pop-ups for this page to open YouTube Music.");
     } catch (e) {
       tab?.close();
-      notify('error', (e as Error).message);
+      notify("error", (e as Error).message);
     } finally {
       setBusy(-1);
     }
@@ -410,12 +366,8 @@ function MusicLinks({ name, links }: { name: string; links: string[] }) {
           }
           onClick={() => void open(link, i)}
         >
-          {busy === i ? (
-            <span className="spinner" aria-hidden />
-          ) : (
-            <IconMusic size={13} />
-          )}
-          {i === 0 ? 'Music' : i + 1}
+          {busy === i ? <span className="spinner" aria-hidden /> : <IconMusic size={13} />}
+          {i === 0 ? "Music" : i + 1}
         </button>
       ))}
     </span>
@@ -438,7 +390,7 @@ function WatchLinks({ name, links }: { name: string; links: string[] }) {
       {links.map((link, i) => (
         <a
           key={link}
-          className={i === 0 ? 'ext-link' : undefined}
+          className={i === 0 ? "ext-link" : undefined}
           href={link}
           target="_blank"
           rel="noreferrer"
