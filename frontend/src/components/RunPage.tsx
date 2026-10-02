@@ -3,7 +3,7 @@ import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
-import { IconArrowLeft, IconExternal, IconPlay, IconTrash } from "./icons.tsx";
+import { IconArrowLeft, IconExternal, IconMusic, IconPlay, IconTrash } from "./icons.tsx";
 import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
 const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
@@ -203,7 +203,7 @@ export function RunPage({ runId }: { runId: number }) {
                 <th className="num">Tracks</th>
                 <th className="col-progress">Added</th>
                 <th>On YouTube</th>
-                <th title="Temporary youtube.com playlists: no quota or sign-in needed, 50 tracks per link">
+                <th title="Temporary playlists: no quota or sign-in needed, 50 tracks per link">
                   Play without quota
                 </th>
               </tr>
@@ -240,7 +240,12 @@ export function RunPage({ runId }: { runId: number }) {
                     )}
                   </td>
                   <td>
-                    <WatchLinks name={g.name} links={g.watchLinks} />
+                    <span className="play-cell">
+                      <WatchLinks name={g.name} links={g.watchLinks} />
+                      {status?.opensInMusic && g.watchLinks.length > 0 && (
+                        <MusicLinks name={g.name} links={g.watchLinks} />
+                      )}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -274,6 +279,62 @@ export function RunPage({ runId }: { runId: number }) {
         </ConfirmDialog>
       )}
     </div>
+  );
+}
+
+/**
+ * The same lists, on YouTube Music.
+ *
+ * The URL cannot be written here: YouTube only mints the temporary playlist when it answers the
+ * watch_videos request, and a page is not allowed to read that answer. So the tab is opened
+ * empty on the click, which keeps it out of the popup blocker, and pointed somewhere once the
+ * server has asked.
+ */
+function MusicLinks({ name, links }: { name: string; links: string[] }) {
+  const { notify } = useApp();
+  const [busy, setBusy] = useState(-1);
+
+  const open = async (link: string, i: number) => {
+    // No "noopener" here: that makes window.open return null, and the handle is the point.
+    // Cutting the new tab's own back-reference instead, while it is still about:blank.
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    setBusy(i);
+    try {
+      const { url } = await api<{ url: string }>("/api/music-link", {
+        method: "POST",
+        body: { url: link },
+      });
+      if (tab) tab.location.href = url;
+      else notify("error", "Allow pop-ups for this page to open YouTube Music.");
+    } catch (e) {
+      tab?.close();
+      notify("error", (e as Error).message);
+    } finally {
+      setBusy(-1);
+    }
+  };
+
+  return (
+    <span className="link-row">
+      {links.map((link, i) => (
+        <button
+          key={link}
+          type="button"
+          className="link ext-link"
+          disabled={busy >= 0}
+          aria-label={
+            links.length === 1
+              ? `Open ${name} in YouTube Music`
+              : `Open ${name} in YouTube Music, part ${i + 1} of ${links.length}`
+          }
+          onClick={() => void open(link, i)}
+        >
+          {busy === i ? <span className="spinner" aria-hidden /> : <IconMusic size={13} />}
+          {i === 0 ? "Music" : i + 1}
+        </button>
+      ))}
+    </span>
   );
 }
 

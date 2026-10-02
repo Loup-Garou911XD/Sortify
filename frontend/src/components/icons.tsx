@@ -110,6 +110,14 @@ export const IconPlay = (p: Props) => (
   </Icon>
 );
 
+export const IconMusic = (p: Props) => (
+  <Icon {...p}>
+    <path d="M9 18V5l11-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="17" cy="16" r="3" />
+  </Icon>
+);
+
 export const IconStop = (p: Props) => (
   <Icon {...p} size={p.size ?? 13}>
     <rect x="6" y="6" width="12" height="12" rx="2" />

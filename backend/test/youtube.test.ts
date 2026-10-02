@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseIsoDuration, QuotaExceededError, YouTubeClient } from "../src/youtube/client.ts";
 import { parsePlaylistId } from "../src/youtube/playlistUrl.ts";
-import { watchLinks } from "../src/youtube/watchLinks.ts";
+import { musicLink, watchLinks } from "../src/youtube/watchLinks.ts";
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status });
@@ -115,5 +115,49 @@ describe("watchLinks", () => {
 
   it("returns no links for no videos", () => {
     expect(watchLinks([])).toEqual([]);
+  });
+});
+
+describe("musicLink", () => {
+  const WATCH = "https://www.youtube.com/watch_videos?video_ids=a,b,c";
+  const redirect = (location: string | null): typeof fetch =>
+    (async () =>
+      new Response(null, {
+        status: 303,
+        ...(location === null ? {} : { headers: { location } }),
+      })) as unknown as typeof fetch;
+
+  it("turns the temporary playlist YouTube mints into a Music link", async () => {
+    const link = await musicLink(
+      WATCH,
+      redirect("https://www.youtube.com/watch?v=a&list=TLGGxyz0MjEwMjAyNg"),
+    );
+    expect(link).toBe("https://music.youtube.com/watch?v=a&list=TLGGxyz0MjEwMjAyNg");
+  });
+
+  it("reads the redirect rather than following it", async () => {
+    let seen: RequestInit | undefined;
+    const spy = (async (_url: string, init?: RequestInit) => {
+      seen = init;
+      return new Response(null, {
+        status: 303,
+        headers: { location: "https://www.youtube.com/watch?v=a&list=TLGG1" },
+      });
+    }) as unknown as typeof fetch;
+    await musicLink(WATCH, spy);
+    expect(seen?.redirect).toBe("manual");
+  });
+
+  it("refuses a URL that is not a watch_videos link", async () => {
+    await expect(musicLink("https://example.com/evil", redirect(null))).rejects.toThrow(
+      /watch_videos/,
+    );
+  });
+
+  it("explains itself when YouTube answers without a playlist", async () => {
+    await expect(musicLink(WATCH, redirect(null))).rejects.toThrow(/did not hand back/);
+    await expect(musicLink(WATCH, redirect("https://www.youtube.com/"))).rejects.toThrow(
+      /did not hand back/,
+    );
   });
 });

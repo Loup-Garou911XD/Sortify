@@ -126,6 +126,12 @@ What differs from the local app, and why:
   `db.ts` does so with `import type`, so `node:sqlite` never reaches the bundle. `enrich/spotify.ts`
   uses `Buffer` for base64, shimmed in `web/src/shims.ts`. If you add a runtime `node:` import to a
   module the pipeline reaches, the web build breaks.
+- **YouTube Music links**: a plan's "Play without quota" links are `youtube.com/watch_videos`
+  URLs. YouTube answers one with a 303 to `watch?v=<first>&list=<id>`, and that id opens in
+  YouTube Music, but reading the redirect needs something that is not a browser: YouTube sends no
+  `access-control-allow-origin` there and answers the preflight with 405. So `musicLink()` runs
+  server-side behind `POST /api/music-link`, `StatusResponse.opensInMusic` says whether the shell
+  can do it, and this build sets it false and shows only the youtube.com link.
 - **Routing**: `useLocation` in `frontend/src/hooks.ts` strips and re-adds `import.meta.env.BASE_URL`
   so the app can live under `/<repo>/`. With the local build's base of `/` this is a no-op.
   `web/dist/404.html` is a copy of `index.html`, which is how Pages serves deep links.

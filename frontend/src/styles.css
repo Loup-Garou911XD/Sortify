@@ -1427,6 +1427,13 @@ li:hover > .row-btn,
   align-items: center;
   gap: 2px 9px;
 }
+/* The two destinations for the same tracks: far enough apart not to read as one list. */
+.play-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 18px;
+}
 .ext-link {
   display: inline-flex;
   align-items: center;

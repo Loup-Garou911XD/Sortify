@@ -157,6 +157,9 @@ const routes: [string, RegExp, Handler][] = [
       sources: providerStatuses(getKeys()),
       dailyQuota: DAILY_QUOTA,
       sync: sync ? syncView(sync.status()) : null,
+      // A page cannot read YouTube's watch_videos redirect: no CORS headers, and the preflight
+      // is a 405. So there is no YouTube Music link in this build.
+      opensInMusic: false,
     }),
   ],
   ["POST", /^\/api\/auth\/start$/, async () => ({ url: await startAuth() })],

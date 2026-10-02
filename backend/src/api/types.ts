@@ -37,6 +37,12 @@ export interface StatusResponse {
   dailyQuota: number;
   /** Null when this build does not sync, or when the user is not signed in. */
   sync: SyncView | null;
+  /**
+   * Whether this shell can turn a watch_videos link into a YouTube Music one. Reading YouTube's
+   * redirect needs something that is not a browser, so the static build cannot, and hides the
+   * YouTube Music links rather than offering one that could never work.
+   */
+  opensInMusic: boolean;
 }
 
 export interface ProviderStatus {

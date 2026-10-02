@@ -32,7 +32,7 @@ import {
   signOut,
 } from "../youtube/auth.ts";
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
-import { watchLinks } from "../youtube/watchLinks.ts";
+import { musicLink, WATCH_VIDEOS, watchLinks } from "../youtube/watchLinks.ts";
 import { JobBusyError, JobRunner } from "./jobs.ts";
 import {
   asObject,
@@ -195,6 +195,7 @@ export function createApp(deps: AppDeps) {
           sources: providerStatuses(config.env),
           dailyQuota: config.dailyQuota,
           sync: sync ? syncView(sync.status()) : null,
+          opensInMusic: true,
         };
       },
     ],
@@ -361,6 +362,24 @@ export function createApp(deps: AppDeps) {
         const runId = store.createRun(id, dimension, minSize, groups);
         sync?.schedule();
         return { runId };
+      },
+    ],
+    [
+      // Asking YouTube for the temporary playlist behind a watch_videos link, so it can be
+      // opened in YouTube Music. Only that one prefix is allowed through: the server must not
+      // become a way to make requests to anywhere else from this machine.
+      "POST",
+      /^\/api\/music-link$/,
+      async (_p, body) => {
+        const req = asObject(await body());
+        if (typeof req.url !== "string" || !req.url.startsWith(WATCH_VIDEOS)) {
+          throw new HttpError(400, "url must be a YouTube watch_videos link");
+        }
+        try {
+          return { url: await musicLink(req.url) };
+        } catch (err) {
+          throw new HttpError(502, (err as Error).message);
+        }
       },
     ],
     ["GET", /^\/api\/runs$/, () => store.listRuns().map(runSummary)],
