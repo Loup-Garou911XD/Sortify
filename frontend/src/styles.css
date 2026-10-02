@@ -19,7 +19,7 @@
   /* ink */
   --ink: light-dark(#15151c, #edeef3);
   --ink-2: light-dark(#55556a, #a9aaba);
-  --ink-3: light-dark(#83839b, #73738a);
+  --ink-3: light-dark(#65657c, #8a8aa0);
 
   /* brand: the mark's violet. In dark it carries dark text, not white. */
   --brand: light-dark(#5b4fd6, #8d85f6);
@@ -1187,6 +1187,12 @@ li:hover > .row-btn,
   color: var(--ink);
   box-shadow: var(--shadow-1);
 }
+/* Fingers need more than a mouse does. */
+@media (pointer: coarse) {
+  .segmented button {
+    height: 34px;
+  }
+}
 
 /* ---------- stats ---------- */
 
@@ -1440,16 +1446,35 @@ li:hover > .row-btn,
   min-width: 3ch;
   text-align: right;
 }
-.link-row {
+/* A part picker (for groups over YouTube's 50-track link limit), then Play and Music. */
+.play-links {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 2px 9px;
+  gap: 4px;
 }
-/* The two destinations for the same tracks: far enough apart not to read as one list. */
-.link-row.wide {
-  gap: 2px 18px;
+.part-picker {
+  height: 32px;
+  margin-right: 4px;
+  font-size: 13px;
 }
+.btn.btn-link {
+  color: var(--brand-ink);
+  padding: 0 8px;
+}
+/* A finished state that sits where a button would, without looking pressable. */
+.done-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 4px 0 8px;
+  color: var(--good);
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
 .ext-link {
   display: inline-flex;
   align-items: center;
@@ -1803,6 +1828,14 @@ li:hover > .row-btn,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.card-sub {
+  margin-top: -6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .card-meta {
   display: flex;
   align-items: center;
@@ -2020,9 +2053,17 @@ li:hover > .row-btn,
 }
 
 /* Phone widths: the top bar keeps its one-line height, so the labels give way first. */
+/* Shown only where the word "Connections" is not, so the trigger never shrinks to a lone dot. */
+.trigger-icon {
+  display: none;
+}
+
 @media (max-width: 560px) {
   .trigger-word {
     display: none;
+  }
+  .trigger-icon {
+    display: block;
   }
 
   /*

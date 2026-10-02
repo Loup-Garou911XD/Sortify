@@ -9,6 +9,7 @@ import {
   IconMenu,
   IconMonitor,
   IconMoon,
+  IconPlug,
   IconRefresh,
   IconSignIn,
   IconSignOut,
@@ -223,6 +224,7 @@ export function TopBar({
             trigger={
               <>
                 <span className={`dot dot-${conn.tone}`} title={conn.text} aria-hidden />
+                <IconPlug size={15} className="trigger-icon" />
                 <span className="trigger-word">Connections</span>
               </>
             }
@@ -378,7 +380,7 @@ export function TopBar({
 
         {!signedIn && (
           <Button variant="primary" onClick={openSignIn}>
-            Connect YouTube
+            Connect<span className="trigger-word"> YouTube</span>
           </Button>
         )}
       </div>

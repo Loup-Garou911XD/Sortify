@@ -1,8 +1,6 @@
 import { useApp } from "../App.tsx";
-import { fmt, pct, plural } from "../hooks.ts";
+import { fmt, pct, planName, plural } from "../hooks.ts";
 import { Button, Progress, StatusPill } from "./ui.tsx";
-
-const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function Home() {
   const { status, playlists, runs, navigate, openSignIn } = useApp();
@@ -103,7 +101,7 @@ export function Home() {
           <span className="eyebrow">Playlists</span>
           <div className="card-grid">
             {playlists.map((p) => {
-              const tagged = Math.max(p.withSubgenre, p.withMood);
+              const tagged = p.enriched;
               return (
                 <a
                   key={p.playlistId}
@@ -135,9 +133,8 @@ export function Home() {
                 href={`/runs/${r.runId}`}
                 onClick={go(`/runs/${r.runId}`)}
               >
-                <span className="card-title">
-                  {r.groupCount} playlists by {BY[r.dimension]}
-                </span>
+                <span className="card-title">{planName(r)}</span>
+                <span className="card-sub">from {r.sourceTitle}</span>
                 <Progress
                   value={r.written}
                   max={r.total}

@@ -7,7 +7,7 @@ import type {
 } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { fmt, pct, plural, quotaFor, useDebounced } from "../hooks.ts";
+import { DIMENSION_NOUN, fmt, pct, planName, plural, quotaFor, useDebounced } from "../hooks.ts";
 import { IconClose } from "./icons.tsx";
 import { Button, EmptyState, Field, Notice, Progress, Segmented } from "./ui.tsx";
 
@@ -29,8 +29,6 @@ const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "mood", label: "Mood" },
   { value: "type", label: "Song type" },
 ];
-
-const DIMENSION_NOUN = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: TrackView[] }) {
   const { status, version, navigate, refresh, runs } = useApp();
@@ -272,7 +270,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                       navigate(`/runs/${r.runId}`);
                     }}
                   >
-                    by {DIMENSION_NOUN[r.dimension]}
+                    {planName(r)}
                   </a>
                 </span>
               ))}

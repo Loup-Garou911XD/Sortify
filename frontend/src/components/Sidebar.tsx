@@ -1,10 +1,8 @@
 import { type FormEvent, useState } from "react";
 import { useApp } from "../App.tsx";
-import { fmt, pct } from "../hooks.ts";
+import { fmt, pct, planName } from "../hooks.ts";
 import { IconPlus } from "./icons.tsx";
 import { Button, Progress, StatusPill } from "./ui.tsx";
-
-const DIMENSION_LABEL = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function Sidebar({ path, open }: { path: string; open: boolean }) {
   const { playlists, runs, status, job, startJob, navigate, openSignIn } = useApp();
@@ -101,7 +99,7 @@ export function Sidebar({ path, open }: { path: string; open: boolean }) {
         ) : (
           <ul className="nav-list">
             {playlists.map((p) => {
-              const tagged = Math.max(p.withSubgenre, p.withMood);
+              const tagged = p.enriched;
               return (
                 <li key={p.playlistId}>
                   {link(
@@ -133,11 +131,9 @@ export function Sidebar({ path, open }: { path: string; open: boolean }) {
               <li key={r.runId}>
                 {link(
                   `/runs/${r.runId}`,
-                  r.sourceTitle,
+                  planName(r),
                   <span className="nav-meta nav-meta-row">
-                    <span className="ellipsis">
-                      {r.groupCount} by {DIMENSION_LABEL[r.dimension]}
-                    </span>
+                    <span className="ellipsis">from {r.sourceTitle}</span>
                     <StatusPill status={r.status} />
                   </span>,
                 )}

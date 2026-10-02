@@ -3,7 +3,7 @@ import type { PlaylistDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
-import { IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
+import { IconCheckCircle, IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
 import { Button, ConfirmDialog, InfoTip, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
@@ -105,6 +105,7 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
             Refresh
           </Button>
           <Button
+            variant="ghost"
             disabled={busy || playlist.enriched === 0}
             title="Re-tag every track; cached lookups are reused, so this is quick"
             onClick={() => run(`/api/playlists/${playlistId}/enrich`, { force: true })}
@@ -153,14 +154,21 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
               </p>
             </InfoTip>
           )}
-          <Button
-            variant="primary"
-            disabled={busy || untagged === 0}
-            onClick={() => run(`/api/playlists/${playlistId}/enrich`)}
-          >
-            <IconTag />
-            {untagged === 0 ? "All tracks tagged" : `Tag ${plural(untagged, "track")}`}
-          </Button>
+          {untagged === 0 ? (
+            <span className="done-label">
+              <IconCheckCircle size={15} />
+              All tracks tagged
+            </span>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={() => run(`/api/playlists/${playlistId}/enrich`)}
+            >
+              <IconTag />
+              Tag {plural(untagged, "track")}
+            </Button>
+          )}
         </div>
       </header>
 

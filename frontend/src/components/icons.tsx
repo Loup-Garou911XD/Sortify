@@ -172,3 +172,11 @@ export const IconInbox = (p: Props) => (
     <path d="M5.4 4.9h13.2a1.5 1.5 0 0 1 1.4 1l2 7.6v4.4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4.4l2-7.6a1.5 1.5 0 0 1 1.4-1Z" />
   </Icon>
 );
+
+export const IconPlug = (p: Props) => (
+  <Icon {...p}>
+    <path d="M9 3.5V8m6-4.5V8" />
+    <path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0Z" />
+    <path d="M12 17v3.5" />
+  </Icon>
+);

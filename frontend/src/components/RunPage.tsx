@@ -2,11 +2,9 @@ import { useState } from "react";
 import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { fmt, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
+import { fmt, planName, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
 import { IconArrowLeft, IconExternal, IconMusic, IconPlay, IconTrash } from "./icons.tsx";
 import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
-
-const BY = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
 
 export function RunPage({ runId }: { runId: number }) {
   const { version, job, status, startJob, navigate, refresh, openSignIn, notify } = useApp();
@@ -77,9 +75,7 @@ export function RunPage({ runId }: { runId: number }) {
             <IconArrowLeft />
             {run.sourceTitle}
           </a>
-          <h1>
-            {plural(run.groupCount, "playlist")} by {BY[run.dimension]}
-          </h1>
+          <h1>{planName(run)}</h1>
           <p className="meta">
             <StatusPill status={applyingThis ? "applying" : run.status} />
             <span className="sep">·</span>
@@ -123,16 +119,17 @@ export function RunPage({ runId }: { runId: number }) {
         )}
       </section>
 
-      {run.status !== "done" && !applyingThis && (
+      {run.status !== "done" && !applyingThis && !status?.signedIn && (
+        <Notice tone="warn">
+          <button type="button" className="link" onClick={openSignIn}>
+            Connect YouTube
+          </button>{" "}
+          to create these playlists.
+        </Notice>
+      )}
+      {run.status !== "done" && !applyingThis && status?.signedIn && (
         <section className="panel" aria-label="Create playlists">
-          {!status?.signedIn ? (
-            <Notice tone="warn">
-              <button type="button" className="link" onClick={openSignIn}>
-                Connect YouTube
-              </button>{" "}
-              to create these playlists.
-            </Notice>
-          ) : confirming ? (
+          {confirming ? (
             <div className="confirm">
               <p>
                 {toCreate > 0 && (
@@ -240,17 +237,13 @@ export function RunPage({ runId }: { runId: number }) {
                     )}
                   </td>
                   <td>
-                    <span className="link-row wide">
-                      <WatchLinks name={g.name} links={g.watchLinks} />
-                      {status?.opensInMusic && (
-                        <MusicLinks
-                          runId={runId}
-                          groupId={g.groupId}
-                          name={g.name}
-                          parts={g.watchLinks.length}
-                        />
-                      )}
-                    </span>
+                    <PlayLinks
+                      runId={runId}
+                      groupId={g.groupId}
+                      name={g.name}
+                      links={g.watchLinks}
+                      inMusic={status?.opensInMusic ?? false}
+                    />
                   </td>
                 </tr>
               ))}
@@ -333,43 +326,46 @@ const saveStep = (
   </li>
 );
 
-/** "Open X" for one link, "Open X, part 2 of 3" when a group needs several. */
-const partLabel = (text: string, i: number, parts: number) =>
-  parts === 1 ? text : `${text}, part ${i + 1} of ${parts}`;
-
 /**
- * The same lists, on YouTube Music.
+ * Where to hear a group without spending quota: a youtube.com temporary playlist and, where this
+ * shell can resolve it, the same tracks in YouTube Music. YouTube caps each link at 50 tracks, so
+ * a bigger group has several parts; a picker chooses one rather than a row of numbered links.
  *
- * The URL cannot be written here: YouTube only mints the temporary playlist when it answers the
- * watch_videos request, and a page is not allowed to read that answer. So the tab is opened
+ * The Music URL cannot be written here: YouTube only mints the temporary playlist when it answers
+ * the watch_videos request, and a page is not allowed to read that answer. So the tab is opened
  * empty on the click, which keeps it out of the popup blocker, and pointed somewhere once the
  * server has asked.
  */
-function MusicLinks({
+function PlayLinks({
   runId,
   groupId,
   name,
-  parts,
+  links,
+  inMusic,
 }: {
   runId: number;
   groupId: number;
   name: string;
-  parts: number;
+  links: string[];
+  inMusic: boolean;
 }) {
   const { notify } = useApp();
-  const [busy, setBusy] = useState(-1);
-  if (parts === 0) return null;
+  const [part, setPart] = useState(0);
+  const [opening, setOpening] = useState(false);
+  if (links.length === 0) return <span className="faint">No tracks</span>;
+  const parts = links.length;
+  const which = parts === 1 ? name : `${name}, part ${part + 1} of ${parts}`;
 
-  const open = async (i: number) => {
+  const openMusic = async () => {
     // No "noopener" here: that makes window.open return null, and the handle is the point.
     // Cutting the new tab's own back-reference instead, while it is still about:blank.
     const tab = window.open("", "_blank");
     if (tab) tab.opener = null;
-    setBusy(i);
+    setOpening(true);
     try {
       const { url } = await api<{ url: string }>(
         `/api/runs/${runId}/groups/${groupId}/music-link`,
-        { method: "POST", body: { part: i + 1 } },
+        { method: "POST", body: { part: part + 1 } },
       );
       if (tab) tab.location.href = url;
       else notify("error", "Allow pop-ups for this page to open YouTube Music.");
@@ -377,62 +373,49 @@ function MusicLinks({
       tab?.close();
       notify("error", (e as Error).message);
     } finally {
-      setBusy(-1);
+      setOpening(false);
     }
   };
 
   return (
-    <span className="link-row">
-      {Array.from({ length: parts }, (_, i) => (
-        <button
-          // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positions, nothing else
-          key={i}
-          type="button"
-          className="link ext-link"
-          disabled={busy >= 0}
-          aria-label={partLabel(`Open ${name} in YouTube Music`, i, parts)}
-          onClick={() => void open(i)}
+    <span className="play-links">
+      {parts > 1 && (
+        <select
+          className="part-picker"
+          aria-label={`Part of ${name} to play`}
+          title="YouTube plays at most 50 tracks per link"
+          value={part}
+          onChange={(e) => setPart(Number(e.target.value))}
         >
-          {busy === i ? <span className="spinner" aria-hidden /> : <IconMusic size={13} />}
-          {i === 0 ? "Music" : i + 1}
-        </button>
-      ))}
-    </span>
-  );
-}
-
-/** One link per 50 tracks; YouTube opens each as a temporary playlist. */
-function WatchLinks({ name, links }: { name: string; links: string[] }) {
-  if (links.length === 0) return <span className="faint">No tracks</span>;
-  if (links.length === 1) {
-    return (
-      <a className="ext-link" href={links[0]} target="_blank" rel="noreferrer">
+          {links.map((link, i) => (
+            <option key={link} value={i}>
+              Part {i + 1} of {parts}
+            </option>
+          ))}
+        </select>
+      )}
+      <a
+        className="btn btn-ghost btn-link"
+        href={links[part]}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Play ${which} on YouTube`}
+      >
         <IconPlay />
         Play
       </a>
-    );
-  }
-  return (
-    <span className="link-row">
-      {links.map((link, i) => (
-        <a
-          key={link}
-          className={i === 0 ? "ext-link" : undefined}
-          href={link}
-          target="_blank"
-          rel="noreferrer"
-          aria-label={partLabel(`Play ${name}`, i, links.length)}
+      {inMusic && (
+        <Button
+          variant="ghost"
+          className="btn-link"
+          busy={opening}
+          aria-label={`Open ${which} in YouTube Music`}
+          onClick={() => void openMusic()}
         >
-          {i === 0 ? (
-            <>
-              <IconPlay />
-              Play 1
-            </>
-          ) : (
-            i + 1
-          )}
-        </a>
-      ))}
+          {!opening && <IconMusic size={14} />}
+          Music
+        </Button>
+      )}
     </span>
   );
 }
