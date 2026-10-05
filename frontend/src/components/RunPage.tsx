@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { fmt, planName, plural, quotaFor, timeAgo, useResource } from "../hooks.ts";
+import { fmt, planName, plural, quotaFor, timeAgo, UNSORTED, useResource } from "../hooks.ts";
 import { IconArrowLeft, IconExternal, IconMusic, IconPlay, IconTrash } from "./icons.tsx";
 import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
@@ -24,7 +24,7 @@ export function RunPage({ runId }: { runId: number }) {
     );
   if (!detail.data) return <PageSkeleton label="Loading the plan" />;
 
-  const { run, groups } = detail.data;
+  const { run, groups, untagged } = detail.data;
   const busy = job?.status === "running";
   const applyingThis = busy && job?.kind === "apply" && job.runId === runId ? job : null;
   const written = applyingThis?.progress?.done ?? run.written;
@@ -34,6 +34,8 @@ export function RunPage({ runId }: { runId: number }) {
   const pending = run.total - run.written;
   const quota = quotaFor(toCreate, pending, status?.dailyQuota ?? 10_000);
   const neverApplied = groups.every((g) => g.targetPlaylistId === null);
+  // Untagged tracks are in this plan only if it kept the leftover group for them.
+  const hasUnsorted = groups.some((g) => g.name === UNSORTED);
   const writeLimit = Number(maxWrites) > 0 ? Math.floor(Number(maxWrites)) : undefined;
 
   const apply = async () => {
@@ -66,6 +68,22 @@ export function RunPage({ runId }: { runId: number }) {
     e.preventDefault();
     navigate(`/playlists/${run.sourcePlaylistId}`);
   };
+
+  /** Said on the page and again in the confirmation, which is the last point of no return. */
+  const untaggedWarning = (
+    <>
+      {plural(untagged, "track")} in “{run.sourceTitle}” {untagged === 1 ? "has" : "have"} no tags
+      yet, so{" "}
+      {hasUnsorted
+        ? `${untagged === 1 ? "it sits" : "they all sit"} in Unsorted here.`
+        : `${untagged === 1 ? "it is" : "they are"} in none of these playlists.`}{" "}
+      To sort {untagged === 1 ? "it" : "them"} properly, tag{" "}
+      <button type="button" className="link" onClick={openSource}>
+        the playlist
+      </button>{" "}
+      and make a new plan.
+    </>
+  );
 
   return (
     <div className="page">
@@ -127,68 +145,70 @@ export function RunPage({ runId }: { runId: number }) {
           to create these playlists.
         </Notice>
       )}
+      {run.status !== "done" && !applyingThis && untagged > 0 && (
+        <Notice tone="warn">{untaggedWarning}</Notice>
+      )}
       {run.status !== "done" && !applyingThis && status?.signedIn && (
         <section className="panel" aria-label="Create playlists">
-          {confirming ? (
-            <div className="confirm">
-              <p>
-                {toCreate > 0 && (
-                  <>
-                    Create <strong>{plural(toCreate, `${privacy} playlist`)}</strong> and add{" "}
-                  </>
-                )}
-                {toCreate === 0 && "Add "}
-                <strong>{plural(pending, "track")}</strong>
-                {writeLimit ? `, stopping after ${plural(writeLimit, "write")}` : ""}. This uses
-                about {fmt(quota.units)} of your {fmt(status.dailyQuota)} daily quota units
-                {quota.days > 1 && `, so it will take about ${quota.days} days`}. If the quota runs
-                out, the plan pauses and you can resume it after midnight Pacific time.
-              </p>
-              <div className="confirm-actions">
-                <Button variant="ghost" onClick={() => setConfirming(false)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={apply}>
-                  {run.status === "planned" ? "Create playlists" : "Resume"}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="apply-row">
-              <Field label="New playlists are">
-                <select
-                  value={privacy}
-                  onChange={(e) => setPrivacy(e.target.value as Privacy)}
-                  disabled={toCreate === 0}
-                >
-                  <option value="private">Private</option>
-                  <option value="unlisted">Unlisted</option>
-                  <option value="public">Public</option>
-                </select>
-              </Field>
-              <Field label="Stop after (optional)">
-                <span className="number-field">
-                  <input
-                    type="number"
-                    min={1}
-                    placeholder="No limit"
-                    value={maxWrites}
-                    onChange={(e) => setMaxWrites(e.target.value)}
-                  />
-                  <span className="muted small">writes</span>
-                </span>
-              </Field>
-              <Button
-                variant="primary"
-                disabled={busy}
-                title={busy ? "Wait for the current task to finish" : undefined}
-                onClick={() => setConfirming(true)}
+          <div className="apply-row">
+            <Field label="New playlists are">
+              <select
+                value={privacy}
+                onChange={(e) => setPrivacy(e.target.value as Privacy)}
+                disabled={toCreate === 0}
               >
-                {run.status === "planned" ? "Create playlists…" : "Resume…"}
-              </Button>
-            </div>
-          )}
+                <option value="private">Private</option>
+                <option value="unlisted">Unlisted</option>
+                <option value="public">Public</option>
+              </select>
+            </Field>
+            <Field label="Stop after (optional)">
+              <span className="number-field">
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="No limit"
+                  value={maxWrites}
+                  onChange={(e) => setMaxWrites(e.target.value)}
+                />
+                <span className="muted small">writes</span>
+              </span>
+            </Field>
+            <Button
+              variant="primary"
+              disabled={busy}
+              title={busy ? "Wait for the current task to finish" : undefined}
+              onClick={() => setConfirming(true)}
+            >
+              {run.status === "planned" ? "Create playlists…" : "Resume…"}
+            </Button>
+          </div>
         </section>
+      )}
+
+      {confirming && status?.signedIn && (
+        <ConfirmDialog
+          title={run.status === "planned" ? "Create these playlists?" : "Resume this plan?"}
+          confirmLabel={run.status === "planned" ? "Create playlists" : "Resume"}
+          onConfirm={apply}
+          onCancel={() => setConfirming(false)}
+        >
+          <p>
+            {toCreate > 0 && (
+              <>
+                Create <strong>{plural(toCreate, `${privacy} playlist`)}</strong> and add{" "}
+              </>
+            )}
+            {toCreate === 0 && "Add "}
+            <strong>{plural(pending, "track")}</strong>
+            {writeLimit ? `, stopping after ${plural(writeLimit, "write")}` : ""}. This uses about{" "}
+            {fmt(quota.units)} of your {fmt(status.dailyQuota)} daily quota units
+            {quota.days > 1 && `, so it will take about ${quota.days} days`}. If the quota runs out,
+            the plan pauses and you can resume it after midnight Pacific time.
+          </p>
+          {/* The last chance to notice: after this, the untagged tracks are written as they are. */}
+          {untagged > 0 && <Notice tone="warn">{untaggedWarning}</Notice>}
+        </ConfirmDialog>
       )}
 
       <div className="table-wrap">

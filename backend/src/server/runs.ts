@@ -33,6 +33,8 @@ export function runSummary(store: Cache, run: Run): RunSummary {
 export function runDetail(store: Cache, run: Run): RunDetail {
   return {
     run: runSummary(store, run),
+    untagged: store.playlistTracks(run.sourcePlaylistId).filter((t) => t.enrichedAt === null)
+      .length,
     groups: store.runGroupProgress(run.runId).map((g) => ({
       groupId: g.groupId,
       name: g.name,

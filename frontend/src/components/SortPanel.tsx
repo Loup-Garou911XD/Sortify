@@ -7,7 +7,17 @@ import type {
 } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { DIMENSION_NOUN, fmt, pct, planName, plural, quotaFor, useDebounced } from "../hooks.ts";
+import {
+  DIMENSION_NOUN,
+  fmt,
+  OTHER,
+  pct,
+  planName,
+  plural,
+  quotaFor,
+  UNSORTED,
+  useDebounced,
+} from "../hooks.ts";
 import { IconClose } from "./icons.tsx";
 import { Button, EmptyState, Field, Notice, Progress, Segmented } from "./ui.tsx";
 
@@ -19,7 +29,7 @@ interface Draft {
   leftover: boolean;
 }
 
-const LEFTOVERS = new Set(["Other", "Unsorted"]);
+const LEFTOVERS = new Set([OTHER, UNSORTED]);
 const PREVIEW_ROWS = 4;
 /** How many more tracks one "Show more" reveals. */
 const MORE_ROWS = 10;
@@ -111,8 +121,9 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   // Checkbox state, which is what the Select/Deselect all buttons act on: a card whose
   // tracks were all removed stays checked but never becomes a playlist.
   const checked = drafts.filter((d) => d.included).length;
-  const untagged = tracks.filter((t) => !t.enriched).length;
-  const noneTagged = untagged === tracks.length;
+  // Nothing tagged at all is a dead end worth saying here; the plan page warns about the rest,
+  // where it matters, just before anything is written.
+  const noneTagged = tracks.length > 0 && tracks.every((t) => !t.enriched);
   const additions = included.reduce((sum, d) => sum + d.videoIds.length, 0);
   const quota = quotaFor(included.length, additions, status?.dailyQuota ?? 10_000);
   // Every card's bar is drawn against the biggest bin, so the grid reads as a histogram.
@@ -211,13 +222,11 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
         </div>
       )}
 
-      {untagged > 0 && (
+      {noneTagged && (
         <div style={{ marginTop: 14 }}>
           <Notice tone="warn">
-            {noneTagged
-              ? `None of these ${fmt(tracks.length)} tracks are tagged yet, so they would all land in Unsorted.`
-              : `${plural(untagged, "track")} ${untagged === 1 ? "isn't" : "aren't"} tagged yet and will land in Unsorted.`}{" "}
-            Tag them from the top of this page first.
+            None of these {fmt(tracks.length)} tracks are tagged yet, so there is nothing to group
+            by. Tag them from the top of this page first.
           </Notice>
         </div>
       )}
@@ -348,7 +357,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
                       </div>
                       {d.leftover && (
                         <p className="group-note">
-                          {d.name === "Unsorted"
+                          {d.name === UNSORTED
                             ? "No tags found for these tracks."
                             : "Their groups were too small to keep."}
                         </p>

@@ -143,6 +143,12 @@ export interface RunGroupView {
 export interface RunDetail {
   run: RunSummary;
   groups: RunGroupView[];
+  /**
+   * Tracks in the source playlist with no tags at all, counted now rather than when the plan was
+   * made. The plan page warns about them before anything is written: they are in Unsorted if the
+   * plan has that group, and in none of its playlists otherwise.
+   */
+  untagged: number;
 }
 
 export interface EnrichRequest {

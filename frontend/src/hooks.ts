@@ -126,6 +126,13 @@ export const fmt = (n: number): string => numberFormat.format(n);
 export const plural = (n: number, one: string, many = `${one}s`): string =>
   `${fmt(n)} ${n === 1 ? one : many}`;
 
+/**
+ * The planner's leftover groups, by name (planner.ts `OTHER` and `UNSORTED`). The frontend cannot
+ * import them: that module reaches `db.ts` and its `node:` imports.
+ */
+export const OTHER = "Other";
+export const UNSORTED = "Unsorted";
+
 export const DIMENSION_NOUN = {
   subgenre: "subgenre",
   mood: "mood",

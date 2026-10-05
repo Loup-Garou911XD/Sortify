@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/db.ts";
-import { groupMusicLink, requireRun } from "../src/server/runs.ts";
+import { groupMusicLink, requireRun, runDetail } from "../src/server/runs.ts";
 
 function planned() {
   const store = new Store(":memory:");
@@ -51,5 +51,19 @@ describe("groupMusicLink", () => {
     await expect(groupMusicLink(store, run, groupId, {}, failing)).rejects.toMatchObject({
       status: 502,
     });
+  });
+});
+
+describe("runDetail", () => {
+  it("counts the source playlist's untagged tracks, as they are now", () => {
+    const { store, run } = planned();
+    expect(runDetail(store, run).untagged).toBe(60);
+
+    store.saveEnrichment(
+      "v0",
+      { artist: "A", songTitle: "v0", externalIds: {}, failedProviders: [] },
+      [{ dimension: "subgenre", value: "Pop", rawTag: "pop", source: "discogs", weight: 1 }],
+    );
+    expect(runDetail(store, run).untagged).toBe(59);
   });
 });
