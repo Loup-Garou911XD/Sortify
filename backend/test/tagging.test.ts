@@ -49,6 +49,20 @@ describe("TagMapper", () => {
     expect(tags.map((t) => t.value).sort()).toEqual(["Chill", "Sad"]);
   });
 
+  it("maps language tags, including tags that imply one", () => {
+    const tags = mapper.languageTags([
+      { tag: "Bollywood", source: "itunes", weight: 1 },
+      { tag: "hindi", source: "lastfm", weight: 0.6 },
+      { tag: "reggaeton", source: "spotify", weight: 0.4 },
+      { tag: "synthwave", source: "lastfm", weight: 1 },
+    ]);
+    expect(tags.map((t) => [t.value, t.source])).toEqual([
+      ["Hindi", "itunes"],
+      ["Hindi", "lastfm"],
+      ["Spanish", "spotify"],
+    ]);
+  });
+
   it("lets a YAML file replace a section", () => {
     const dir = tempDir();
     const path = join(dir, "tag_map.yaml");

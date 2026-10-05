@@ -7,6 +7,8 @@
  * - `families`: broad genres, used only when a track has no subgenre.
  * - `subgenres`: detailed genres; Discogs styles are the main source.
  * - `moods`: from Last.fm track tags.
+ * - `languages`: tags that name a language outright ("hindi") or belong to one in practice
+ *   ("bollywood", "reggaeton"). The title's script adds to these (see enrich/language.ts).
  *
  * Users can override any section with ~/.config/sortify/tag_map.yaml (same shape).
  */
@@ -14,6 +16,7 @@ export interface TagMap {
   families: Record<string, string[]>;
   subgenres: Record<string, string[]>;
   moods: Record<string, string[]>;
+  languages: Record<string, string[]>;
 }
 
 export const DEFAULT_TAG_MAP: TagMap = {
@@ -249,5 +252,59 @@ export const DEFAULT_TAG_MAP: TagMap = {
     Nostalgic: ["nostalgia", "memories", "throwback"],
     Focus: ["study", "studying", "concentration", "study music", "work music", "coding"],
     Epic: ["powerful", "anthemic", "cinematic"],
+  },
+  languages: {
+    English: ["english"],
+    // Indian languages: provider tags name the film industry or the regional style far more
+    // often than the language itself.
+    Hindi: ["bollywood", "filmi", "hindi film", "hindi film music", "modern bollywood", "indipop"],
+    Punjabi: ["punjabi music", "bhangra", "modern bhangra", "punjabi pop", "punjabi hip hop"],
+    Tamil: ["kollywood", "tamil pop"],
+    Telugu: ["tollywood", "telugu pop"],
+    Kannada: ["sandalwood"],
+    Malayalam: ["mollywood"],
+    Bengali: ["bangla", "bengali pop"],
+    Marathi: [],
+    Gujarati: [],
+    Bhojpuri: [],
+    Haryanvi: ["haryanvi pop"],
+    Urdu: ["ghazal", "ghazals", "qawwali"],
+    Korean: ["k-pop", "kpop", "korean pop", "k-hip hop", "korean hip hop", "k-rap", "trot"],
+    Japanese: ["j-pop", "jpop", "japanese pop", "j-rock", "jrock", "anisong", "enka", "visual kei"],
+    Mandarin: ["chinese", "mandopop", "c-pop", "cpop"],
+    Cantonese: ["cantopop"],
+    Spanish: [
+      "espanol",
+      "latin pop",
+      "reggaeton",
+      "latin trap",
+      "bachata",
+      "salsa",
+      "cumbia",
+      "regional mexican",
+      "corridos",
+      "corridos tumbados",
+      "flamenco",
+      "ranchera",
+    ],
+    Portuguese: ["brazilian", "brasileiro", "mpb", "sertanejo", "bossa nova", "funk carioca"],
+    French: ["francais", "chanson", "chanson francaise", "french pop"],
+    German: ["deutsch", "deutschrap", "german hip hop", "neue deutsche welle"],
+    Italian: ["italiano", "italian pop"],
+    Russian: ["russian pop", "russian rock", "russkiy rock"],
+    Ukrainian: [],
+    Polish: [],
+    Turkish: ["turkce", "turkce pop", "anatolian rock"],
+    Arabic: ["arab", "arabic pop", "khaleeji", "egyptian"],
+    Hebrew: ["israeli"],
+    Persian: ["farsi", "iranian"],
+    Greek: ["laiko", "entehno"],
+    Thai: ["thai pop", "luk thung"],
+    Vietnamese: ["v-pop", "vpop"],
+    Indonesian: ["dangdut"],
+    Swedish: [],
+    Afrikaans: [],
+    Swahili: ["bongo flava"],
+    Yoruba: [],
   },
 };

@@ -154,6 +154,7 @@ describe("api", () => {
       ["lastfm", false],
       ["spotify", false],
       ["itunes", true],
+      ["deezer", true],
       ["youtube", true],
     ]);
     expect(body.sources[2]).toMatchObject({ label: "Last.fm", envVars: ["LASTFM_API_KEY"] });

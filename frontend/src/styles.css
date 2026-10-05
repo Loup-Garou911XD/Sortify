@@ -28,9 +28,11 @@
   --brand-ink: light-dark(#3d34a3, #b8b2ff);
   --on-brand: light-dark(#ffffff, #100e1e);
 
-  /* dimensions: subgenre uses the brand, mood a warm amber, type stays neutral */
+  /* dimensions: subgenre uses the brand, mood a warm amber, language a teal, type stays neutral */
   --mood: light-dark(#9d5017, #f0a873);
   --mood-tint: light-dark(#fbeee3, #362110);
+  --lang: light-dark(#10686d, #6ccfd6);
+  --lang-tint: light-dark(#e3f2f3, #0f2d30);
 
   /* semantics */
   --good: light-dark(#0e7a46, #52d190);
@@ -1015,6 +1017,15 @@ li:hover > .row-btn,
   color: var(--ink-2);
   box-shadow: inset 0 0 0 1px var(--line);
 }
+.chip-language {
+  background: var(--lang-tint);
+  color: var(--lang);
+}
+.chip-decade {
+  background: var(--panel-2);
+  color: var(--ink-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
 
 .pill {
   display: inline-flex;
@@ -1533,6 +1544,17 @@ li:hover > .row-btn,
 }
 .summary-coverage .meter {
   width: 110px;
+}
+
+/* Bulk include/exclude for the plan's cards, above the grid. */
+.groups-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.groups-bar .muted {
+  margin-right: auto;
 }
 
 .groups {

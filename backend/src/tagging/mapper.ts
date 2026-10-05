@@ -26,6 +26,7 @@ export function mergeTagMap(override: Partial<TagMap> | null | undefined): TagMa
     families: override.families ?? DEFAULT_TAG_MAP.families,
     subgenres: override.subgenres ?? DEFAULT_TAG_MAP.subgenres,
     moods: override.moods ?? DEFAULT_TAG_MAP.moods,
+    languages: override.languages ?? DEFAULT_TAG_MAP.languages,
   };
 }
 
@@ -42,17 +43,30 @@ export class TagMapper {
   private readonly families: Map<string, string>;
   private readonly subgenres: Map<string, string>;
   private readonly moods: Map<string, string>;
+  private readonly languages: Map<string, string>;
 
   constructor(map: TagMap = DEFAULT_TAG_MAP) {
     this.families = buildIndex(map.families);
     this.subgenres = buildIndex(map.subgenres);
     this.moods = buildIndex(map.moods);
+    this.languages = buildIndex(map.languages);
   }
 
   /** Subgenre tags; falls back to broad families only when no subgenre matched. */
   genres(raw: RawTag[]): Tag[] {
     const subgenres = this.lookup(raw, this.subgenres, "subgenre");
     return subgenres.length > 0 ? subgenres : this.lookup(raw, this.families, "subgenre");
+  }
+
+  /** Whether any section has a label for this raw tag, i.e. whether it survives mapping. */
+  maps(tag: string): boolean {
+    const normalized = normalizeTag(tag);
+    return (
+      this.subgenres.has(normalized) ||
+      this.families.has(normalized) ||
+      this.moods.has(normalized) ||
+      this.languages.has(normalized)
+    );
   }
 
   /** Whether any raw tag maps to a detailed subgenre (not just a broad family). */
@@ -62,6 +76,11 @@ export class TagMapper {
 
   moodTags(raw: RawTag[]): Tag[] {
     return this.lookup(raw, this.moods, "mood");
+  }
+
+  /** Language tags, from tags that name one or belong to one ("bollywood", "cantopop"). */
+  languageTags(raw: RawTag[]): Tag[] {
+    return this.lookup(raw, this.languages, "language");
   }
 
   private lookup(raw: RawTag[], index: Map<string, string>, dimension: Tag["dimension"]): Tag[] {

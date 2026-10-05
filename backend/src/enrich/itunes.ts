@@ -1,6 +1,6 @@
 import { type LookupDeps, ServiceClient } from "./lookup.ts";
 import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
-import { bestMatch, similarity } from "./text.ts";
+import { bestMatch, similarity, yearOf } from "./text.ts";
 
 /** The cached form of a search result. */
 export interface ItunesMatch {
@@ -8,6 +8,8 @@ export interface ItunesMatch {
   id: string;
   /** The song's primary genre, e.g. "Punjabi Pop", "Bollywood", "Alternative". */
   genre: string;
+  /** Release year, for the `decade` tag. Absent in entries cached before it was read. */
+  year?: number;
 }
 
 interface SearchResponse {
@@ -16,6 +18,7 @@ interface SearchResponse {
     artistName: string;
     trackName: string;
     primaryGenreName?: string;
+    releaseDate?: string;
   }[];
 }
 
@@ -55,6 +58,7 @@ export class ITunes implements ProviderClient {
     return {
       externalId: match.id,
       genres: [{ tag: match.genre, source: this.id, weight: GENRE_WEIGHT }],
+      year: match.year,
     };
   }
 }
@@ -68,7 +72,8 @@ export function pickSong(
     (r) => r.primaryGenreName && similarity(r.artistName, artist) >= MIN_SIMILARITY,
   );
   const r = bestMatch(candidates, (c) => similarity(c.trackName, title), MIN_SIMILARITY);
-  return r?.primaryGenreName ? { id: String(r.trackId), genre: r.primaryGenreName } : null;
+  if (!r?.primaryGenreName) return null;
+  return { id: String(r.trackId), genre: r.primaryGenreName, year: yearOf(r.releaseDate) };
 }
 
 export const itunes: TagProvider = {

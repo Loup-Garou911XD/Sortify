@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/db.ts";
+import { Deezer, parseAlbum, pickTrack as pickDeezerTrack } from "../src/enrich/deezer.ts";
 import { ITunes, pickSong } from "../src/enrich/itunes.ts";
 import { Budget, type FetchLike, type LookupDeps } from "../src/enrich/lookup.ts";
+import { MusicBrainz } from "../src/enrich/musicbrainz.ts";
 import { enrichPlaylist } from "../src/enrich/pipeline.ts";
 import type { ProviderClient } from "../src/enrich/provider.ts";
+import { createProviderClients, providerStatuses, SERVER_ONLY } from "../src/enrich/providers.ts";
 import { Spotify } from "../src/enrich/spotify.ts";
 import { YouTubeTopics } from "../src/enrich/youtubeTopics.ts";
 import { TagMapper } from "../src/tagging/mapper.ts";
@@ -171,5 +174,150 @@ describe("Spotify", () => {
     await expect(
       client.trackTags({ videoId: "v", artist: "Karan Aujla", title: "Softly" }),
     ).rejects.toThrow(/SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET/);
+  });
+});
+
+describe("Deezer", () => {
+  const fakeDeezer = (): { fetch: FetchLike; calls: string[] } => {
+    const calls: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      const url = new URL(input);
+      calls.push(url.pathname);
+      if (url.pathname === "/search") {
+        return json({
+          data: [
+            { id: 1, title: "Softly", artist: { name: "Karan Aujla" }, album: { id: 9 } },
+            { id: 2, title: "Softly (Live)", artist: { name: "Karan Aujla" }, album: { id: 8 } },
+          ],
+        });
+      }
+      return json({ genres: { data: [{ name: "Indian Music" }] }, release_date: "2023-04-21" });
+    };
+    return { fetch, calls };
+  };
+
+  it("takes album genres and the release year, one album lookup per album", async () => {
+    const store = new Store(":memory:");
+    playlist(store, [
+      ["a", "Karan Aujla - Softly", "Karan Aujla"],
+      ["b", "Karan Aujla - Softly", "other channel"],
+    ]);
+    const { fetch, calls } = fakeDeezer();
+    await enrichPlaylist(store, "PL", {
+      mapper: new TagMapper(),
+      clients: [new Deezer(deps(fetch, store))],
+    });
+
+    expect(subgenres(store, "a")).toEqual(["Indian (deezer)"]);
+    expect(store.playlistTags("PL", "decade").map((t) => [t.value, t.rawTag, t.source])).toEqual([
+      ["2020s", "2023", "deezer"],
+      ["2020s", "2023", "deezer"],
+    ]);
+    // Both tracks are the same lookup, so the second is served from the cache.
+    expect(calls).toEqual(["/search", "/album/9"]);
+  });
+
+  it("keeps the best title match and ignores a wrong artist", () => {
+    const body = {
+      data: [
+        { id: 1, title: "Softly (Live)", artist: { name: "Karan Aujla" }, album: { id: 9 } },
+        { id: 2, title: "Softly", artist: { name: "Karan Aujla" }, album: { id: 7 } },
+        { id: 3, title: "Softly", artist: { name: "Someone Else" }, album: { id: 1 } },
+      ],
+    };
+    expect(pickDeezerTrack(body, "Karan Aujla", "Softly")).toEqual({ id: "2", albumId: "7" });
+    expect(pickDeezerTrack(body, "Nobody", "Softly")).toBeNull();
+    // An album with nothing on it is a miss, so the cache can expire it.
+    expect(parseAlbum({ genres: { data: [] } })).toBeNull();
+  });
+});
+
+describe("MusicBrainz genres", () => {
+  const fakeMb = (): { fetch: FetchLike; calls: string[] } => {
+    const calls: string[] = [];
+    const fetch: FetchLike = async (input) => {
+      const url = new URL(input);
+      calls.push(url.pathname);
+      if (url.pathname === "/ws/2/recording") {
+        return json({
+          recordings: [
+            {
+              id: "mb-1",
+              score: 100,
+              title: "Softly",
+              "artist-credit": [{ name: "Karan Aujla" }],
+              tags: [{ name: "pop", count: 1 }],
+            },
+          ],
+        });
+      }
+      return json({ genres: [{ name: "bhangra", count: 3 }], "first-release-date": "2003-05-01" });
+    };
+    return { fetch, calls };
+  };
+
+  it("asks for curated genres only when nothing else placed the track", async () => {
+    const store = new Store(":memory:");
+    playlist(store, [["a", "Karan Aujla - Softly", "Karan Aujla"]]);
+    const { fetch, calls } = fakeMb();
+    await enrichPlaylist(store, "PL", {
+      mapper: new TagMapper(),
+      clients: [new MusicBrainz(deps(fetch, store))],
+    });
+
+    // The search's loose "pop" tag only reaches a family, so the genre lookup follows.
+    expect(subgenres(store, "a")).toEqual(["Bhangra (musicbrainz)"]);
+    expect(store.playlistTags("PL", "decade").map((t) => t.value)).toEqual(["2000s"]);
+    expect(calls).toEqual(["/ws/2/recording", "/ws/2/recording/mb-1"]);
+  });
+
+  it("makes no lookup for a track it did not resolve itself", async () => {
+    const { fetch, calls } = fakeMb();
+    const client = new MusicBrainz(deps(fetch));
+    expect(await client.trackTags({ videoId: "v", artist: "A", title: "B" })).toEqual({
+      genres: [],
+    });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("tracks with no artist in the title", () => {
+  it("still gets the providers that read per-video data", async () => {
+    const store = new Store(":memory:");
+    // A label channel with no separator in the title: nothing to search a music database with.
+    playlist(store, [["a", "aaj ki raat", "T-Series"]]);
+    store.setVideoDetails(new Map([["a", { durationS: 200, topics: ["Indian music"] }]]));
+    const asked: string[] = [];
+    const searcher: ProviderClient = {
+      id: "fake",
+      trackTags: async ({ title }) => {
+        asked.push(title);
+        return { genres: [] };
+      },
+    };
+    await enrichPlaylist(store, "PL", {
+      mapper: new TagMapper(),
+      clients: [searcher, new YouTubeTopics(store)],
+    });
+
+    expect(asked).toEqual([]);
+    expect(subgenres(store, "a")).toEqual(["Indian (youtube)"]);
+    // Tagged, so the next run does not try it again.
+    expect(store.playlistTracks("PL")[0]?.enrichedAt).not.toBeNull();
+  });
+});
+
+describe("the provider registry", () => {
+  it("knows which providers a browser cannot reach", () => {
+    expect(SERVER_ONLY).toEqual(["deezer"]);
+    // The static build passes them as `skip`, so neither list offers them.
+    expect(providerStatuses({}, SERVER_ONLY).map((p) => p.id)).not.toContain("deezer");
+    expect(
+      createProviderClients(
+        deps(async () => json({})),
+        {},
+        SERVER_ONLY,
+      ).map((c) => c.id),
+    ).not.toContain("deezer");
   });
 });

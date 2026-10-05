@@ -117,6 +117,7 @@ describe("enrichPlaylist", () => {
       enriched: 3,
       remaining: 0,
       retryLater: 0,
+      propagated: 0,
       stoppedByBudget: false,
       cancelled: false,
     });
@@ -167,6 +168,7 @@ describe("enrichPlaylist", () => {
       enriched: partial.remaining,
       remaining: 0,
       retryLater: 0,
+      propagated: 0,
       stoppedByBudget: false,
       cancelled: false,
     });
@@ -194,6 +196,7 @@ describe("enrichPlaylist", () => {
       enriched: 1,
       remaining: 2,
       retryLater: 0,
+      propagated: 0,
       stoppedByBudget: false,
       cancelled: true,
     });
@@ -351,16 +354,19 @@ describe("providers", () => {
       ["lastfm", false],
       ["spotify", false],
       ["itunes", true],
+      ["deezer", true],
       ["youtube", true],
     ]);
     expect(createProviderClients(deps, env).map((c) => c.id)).toEqual([
       "musicbrainz",
       "discogs",
       "itunes",
+      "deezer",
       "youtube",
     ]);
     expect(createProviderClients(deps, env, ["musicbrainz", "itunes"]).map((c) => c.id)).toEqual([
       "discogs",
+      "deezer",
       "youtube",
     ]);
   });

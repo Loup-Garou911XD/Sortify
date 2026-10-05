@@ -18,7 +18,7 @@ export function Home() {
     },
     {
       title: "Tag the tracks",
-      text: "Subgenres, moods and song types are looked up from music metadata services.",
+      text: "Subgenres, moods, song types, languages and release decades come from music metadata services.",
       done: playlists.some((p) => p.enriched > 0),
     },
     {
@@ -88,8 +88,9 @@ export function Home() {
           <header className="hero">
             <h1>Split one big playlist into focused ones</h1>
             <p className="lead">
-              Sortify reads a playlist, tags every track with a subgenre, mood and song type, then
-              groups them. Nothing is written to YouTube until you approve the plan.
+              Sortify reads a playlist, tags every track with a subgenre, mood, song type, language
+              and decade, then groups them. Nothing is written to YouTube until you approve the
+              plan.
             </p>
           </header>
           {stepList}

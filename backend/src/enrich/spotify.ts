@@ -1,7 +1,7 @@
 import type { FetchLike, LookupDeps } from "./lookup.ts";
 import { ServiceClient } from "./lookup.ts";
 import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
-import { bestMatch, similarity } from "./text.ts";
+import { bestMatch, similarity, yearOf } from "./text.ts";
 
 const API = "https://api.spotify.com/v1";
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -15,10 +15,19 @@ export interface SpotifyMatch {
   id: string;
   /** The matched artist, whose genres are looked up (and cached) separately. */
   artistId: string;
+  /** Release year of the album the track was found on. Absent in older cache entries. */
+  year?: number;
 }
 
 interface SearchResponse {
-  tracks?: { items?: { id: string; name: string; artists: { id: string; name: string }[] }[] };
+  tracks?: {
+    items?: {
+      id: string;
+      name: string;
+      artists: { id: string; name: string }[];
+      album?: { release_date?: string };
+    }[];
+  };
 }
 
 /**
@@ -102,6 +111,7 @@ export class Spotify implements ProviderClient {
     return {
       externalId: match.id,
       genres: genres.map((tag) => ({ tag, source: this.id, weight: GENRE_WEIGHT })),
+      year: match.year,
     };
   }
 }
@@ -116,7 +126,12 @@ export function pickTrack(
     return a ? [{ item, artistId: a.id }] : [];
   });
   const best = bestMatch(credited, (c) => similarity(c.item.name, title), MIN_SIMILARITY);
-  return best ? { id: best.item.id, artistId: best.artistId } : null;
+  if (!best) return null;
+  return {
+    id: best.item.id,
+    artistId: best.artistId,
+    year: yearOf(best.item.album?.release_date),
+  };
 }
 
 export const spotify: TagProvider = {

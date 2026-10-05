@@ -63,3 +63,12 @@ export function similarity(a: string, b: string): number {
   }
   return total === 0 ? 0 : (2 * overlap) / total;
 }
+
+/**
+ * The year out of a release date, whatever precision the service gave ("2013", "2013-05",
+ * "2013-05-17T07:00:00Z"). Undefined when there is nothing to read.
+ */
+export function yearOf(date: string | undefined): number | undefined {
+  const year = Number(date?.slice(0, 4));
+  return Number.isInteger(year) && year > 0 ? year : undefined;
+}

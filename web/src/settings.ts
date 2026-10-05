@@ -126,7 +126,8 @@ export const SOURCE_GUIDES: Record<string, SourceGuide> = {
   },
   musicbrainz: {
     title: "MusicBrainz",
-    blurb: "Corrects artist and title spelling before the other sources are asked.",
+    blurb:
+      "Corrects artist and title spelling before the other sources are asked, and adds curated genres for the tracks nothing else placed.",
     steps: ["No key needed. It is always on."],
     fields: [],
   },

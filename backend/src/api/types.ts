@@ -4,9 +4,9 @@
  * modules at all.
  */
 
-export type Dimension = "subgenre" | "mood" | "type";
+export type Dimension = "subgenre" | "mood" | "type" | "language" | "decade";
 /** Every dimension, for validating input and listing choices. */
-export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type"];
+export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type", "language", "decade"];
 /** Where a tag came from: "rule" (title rules) or a provider id (see ProviderStatus). */
 export type TagSource = string;
 export type RunStatus = "planned" | "applying" | "paused" | "done";

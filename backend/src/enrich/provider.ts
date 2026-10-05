@@ -15,6 +15,12 @@ export interface TagProvider {
   help: string;
   /** Environment variables it needs (API keys). If any is missing, the provider is off. */
   envVars: string[];
+  /**
+   * The service answers without an `access-control-allow-origin` header, so a browser cannot
+   * read it: the static build leaves this provider out (see web/src/api.ts). Shells with a
+   * server of their own are unaffected.
+   */
+  serverOnly?: boolean;
   create(deps: LookupDeps, env: NodeJS.ProcessEnv): ProviderClient;
 }
 
@@ -23,6 +29,11 @@ export interface TrackQuery {
   videoId: string;
   artist: string;
   title: string;
+  /**
+   * Ids earlier steps established, keyed by provider id. A provider can look up its own id (the
+   * one its `resolve` returned) to ask a second, cheaper question about the same track.
+   */
+  externalIds?: Record<string, string>;
 }
 
 export interface Resolution {
@@ -31,6 +42,8 @@ export interface Resolution {
   /** The provider's id for the matched recording or release. */
   externalId?: string;
   genres?: RawTag[];
+  /** Year of the earliest release the provider knows, for the `decade` tag. */
+  year?: number;
 }
 
 export interface TrackTags {
@@ -38,11 +51,18 @@ export interface TrackTags {
   /** Genre-like tags, already weighted 0–1 by the provider's own trust in them. */
   genres: RawTag[];
   moods?: RawTag[];
+  /** Year of the earliest release the provider knows, for the `decade` tag. */
+  year?: number;
 }
 
 /** One provider for one tagging run. Implement whichever steps the service can do. */
 export interface ProviderClient {
   readonly id: string;
+  /**
+   * Works from the video alone (per-video data already in the cache), so it is asked even about
+   * tracks whose title gave no artist or song name — the uploads no music database would match.
+   */
+  readonly videoOnly?: boolean;
   /**
    * Ask only about tracks the other providers gave no subgenre, e.g. for a slow or strictly
    * rate-limited service. Fallback providers run after the parallel step, before artist tags.

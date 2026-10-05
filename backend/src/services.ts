@@ -48,14 +48,23 @@ export async function fetchPlaylist(
   };
 }
 
-/** Clients for every configured tagging provider (minus `skip`), sharing one API budget. */
+/**
+ * Clients for every configured tagging provider (minus `skip`), sharing one API budget. With
+ * `offline` they answer from the lookup cache alone and make no requests, which is how the tag
+ * report replays what the services already said.
+ */
 export function createEnrichers(
   config: Config,
   store: Store,
-  options: { maxApiCalls?: number; skip?: readonly string[] } = {},
+  options: { maxApiCalls?: number; skip?: readonly string[]; offline?: boolean } = {},
 ): { enrichers: Enrichers; budget: Budget } {
   const budget = new Budget(options.maxApiCalls);
-  const deps: LookupDeps = { store, budget, userAgent: config.userAgent };
+  const deps: LookupDeps = {
+    store,
+    budget,
+    userAgent: config.userAgent,
+    offline: options.offline,
+  };
   return {
     budget,
     enrichers: {

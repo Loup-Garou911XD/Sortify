@@ -126,7 +126,13 @@ export const fmt = (n: number): string => numberFormat.format(n);
 export const plural = (n: number, one: string, many = `${one}s`): string =>
   `${fmt(n)} ${n === 1 ? one : many}`;
 
-export const DIMENSION_NOUN = { subgenre: "subgenre", mood: "mood", type: "song type" } as const;
+export const DIMENSION_NOUN = {
+  subgenre: "subgenre",
+  mood: "mood",
+  type: "song type",
+  language: "language",
+  decade: "decade",
+} as const;
 
 /** A plan's name wherever it is shown: "3 playlists by subgenre". */
 export const planName = (run: {

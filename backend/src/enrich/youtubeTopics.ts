@@ -13,6 +13,8 @@ const GENERIC = new Set(["Music"]);
  */
 export class YouTubeTopics implements ProviderClient {
   readonly id = "youtube";
+  /** The labels hang off the video, so a title no database could match still gets these. */
+  readonly videoOnly = true;
   private readonly store: Cache;
 
   constructor(store: Cache) {

@@ -8,7 +8,8 @@ import { Button, Segmented, TagChips } from "./ui.tsx";
 type Filter = "all" | "untagged" | "tagged";
 const PAGE = 200;
 
-const hasGenreOrMood = (t: TrackView) => t.tags.some((g) => g.dimension !== "type");
+const hasGenreOrMood = (t: TrackView) =>
+  t.tags.some((g) => g.dimension === "subgenre" || g.dimension === "mood");
 
 export function TracksTable({ tracks }: { tracks: TrackView[] }) {
   const { status } = useApp();
@@ -78,6 +79,8 @@ export function TracksTable({ tracks }: { tracks: TrackView[] }) {
                 <th>Subgenre</th>
                 <th>Mood</th>
                 <th>Type</th>
+                <th>Language</th>
+                <th>Decade</th>
                 <th className="num">Length</th>
               </tr>
             </thead>
@@ -111,6 +114,12 @@ export function TracksTable({ tracks }: { tracks: TrackView[] }) {
                   </td>
                   <td>
                     <TagChips tags={t.tags} dimension="type" />
+                  </td>
+                  <td>
+                    <TagChips tags={t.tags} dimension="language" />
+                  </td>
+                  <td>
+                    <TagChips tags={t.tags} dimension="decade" />
                   </td>
                   <td className="num muted">{duration(t.durationS)}</td>
                 </tr>

@@ -19,6 +19,7 @@ import type {
   Track,
   TrackTag,
 } from "../../backend/src/db.ts";
+import { isCachedMiss } from "../../backend/src/enrich/cache.ts";
 import {
   type MergeNotes,
   mergeSnapshots,
@@ -39,6 +40,20 @@ const FLUSH_MS = 600;
 /** How long to wait for another tab to release an older database before giving up on it. */
 const BLOCKED_MS = 3000;
 const SEP = "\x00";
+
+/**
+ * A cached provider answer and when it arrived. Records written before the time was kept read as
+ * "long ago" (`at` 0), which only matters for a cached "no match": those expire, matches do not.
+ */
+interface CacheEntry {
+  body: unknown;
+  at: number;
+}
+
+const cacheEntry = (stored: unknown): CacheEntry =>
+  stored !== null && typeof stored === "object" && "at" in stored && "body" in stored
+    ? (stored as CacheEntry)
+    : { body: stored, at: 0 };
 
 /**
  * One IndexedDB object store per collection, each keyed by the record's own id, so a write
@@ -171,7 +186,7 @@ export class BrowserStore implements Syncable {
   private readonly playlists = new Map<string, PlaylistRow>();
   private readonly tracks = new Map<string, TrackRow>();
   private readonly tags = new Map<string, Tag[]>();
-  private readonly cache = new Map<string, unknown>();
+  private readonly cache = new Map<string, CacheEntry>();
   /** playlistId -> when it was deleted here. */
   private readonly deleted = new Map<string, string>();
   private runs: Run[] = [];
@@ -243,7 +258,7 @@ export class BrowserStore implements Syncable {
     for (const [k, v] of playlists) this.playlists.set(k, v);
     for (const [k, v] of tracks) this.tracks.set(k, v);
     for (const [k, v] of tags) this.tags.set(k, v);
-    for (const [k, v] of cache) this.cache.set(k, v);
+    for (const [k, v] of cache) this.cache.set(k, cacheEntry(v));
     for (const [k, v] of items) this.items.set(Number(k), v);
     for (const [k, v] of deleted) this.deleted.set(k, v);
     const header = runs.find(([k]) => k === RUNS_KEY)?.[1];
@@ -479,6 +494,20 @@ export class BrowserStore implements Syncable {
     });
   }
 
+  /** See the SQLite store's `addTags`: adds without touching the tags a track already has. */
+  addTags(videoId: string, tags: Tag[]): void {
+    this.tx(() => {
+      const best = new Map<string, Tag>();
+      for (const t of [...(this.tags.get(videoId) ?? []), ...tags]) {
+        const key = [t.dimension, t.value, t.source].join(SEP);
+        const current = best.get(key);
+        if (!current || t.weight > current.weight) best.set(key, t);
+      }
+      this.tags.set(videoId, [...best.values()]);
+      this.touch("tags", videoId);
+    });
+  }
+
   private tagsIn(playlistId: string): TrackTag[] {
     const ids = this.playlists.get(playlistId)?.items ?? [];
     const out: TrackTag[] = [];
@@ -498,13 +527,19 @@ export class BrowserStore implements Syncable {
 
   // --- provider lookup cache ------------------------------------------------------
 
-  cacheGet(source: string, key: string): unknown {
-    return this.cache.get(source + SEP + key);
+  /** See the SQLite store's `cacheGet`: `missTtlMs` expires a cached "no match", never a match. */
+  cacheGet(source: string, key: string, missTtlMs?: number): unknown {
+    const entry = this.cache.get(source + SEP + key);
+    if (entry === undefined) return undefined;
+    if (missTtlMs !== undefined && isCachedMiss(entry.body) && entry.at + missTtlMs < Date.now()) {
+      return undefined;
+    }
+    return entry.body;
   }
 
   cachePut(source: string, key: string, body: unknown): void {
     const id = source + SEP + key;
-    this.cache.set(id, body);
+    this.cache.set(id, { body, at: Date.now() });
     this.touch("cache", id);
   }
 
@@ -692,9 +727,14 @@ export class BrowserStore implements Syncable {
       })),
       tracks: [...this.tracks.values()],
       tags: [...this.tags].map(([videoId, tags]) => ({ videoId, tags })),
-      cache: [...this.cache].map(([id, body]) => {
+      cache: [...this.cache].map(([id, entry]) => {
         const at = id.indexOf(SEP);
-        return { source: id.slice(0, at), key: id.slice(at + 1), body };
+        return {
+          source: id.slice(0, at),
+          key: id.slice(at + 1),
+          body: entry.body,
+          fetchedAt: new Date(entry.at).toISOString(),
+        };
       }),
       deleted: [...this.deleted].map(([playlistId, at]) => ({ playlistId, at })),
       runs: this.runs.map((run) => ({
@@ -756,7 +796,7 @@ export class BrowserStore implements Syncable {
     }
     for (const c of merged.cache) {
       const id = c.source + SEP + c.key;
-      this.cache.set(id, c.body);
+      this.cache.set(id, { body: c.body, at: c.fetchedAt ? Date.parse(c.fetchedAt) : 0 });
       this.touch("cache", id);
     }
     this.runs = merged.runs.map(({ groups: _groups, ...run }) => run);

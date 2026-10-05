@@ -1,4 +1,5 @@
 import type { ProviderStatus } from "../api/types.ts";
+import { deezer } from "./deezer.ts";
 import { discogs } from "./discogs.ts";
 import { itunes } from "./itunes.ts";
 import { lastfm } from "./lastfm.ts";
@@ -19,14 +20,19 @@ export const PROVIDERS: readonly TagProvider[] = [
   lastfm,
   spotify,
   itunes,
+  deezer,
   youtubeTopics,
 ];
 
 export const isConfigured = (provider: TagProvider, env: NodeJS.ProcessEnv): boolean =>
   provider.envVars.every((name) => Boolean(env[name]?.trim()));
 
-export function providerStatuses(env: NodeJS.ProcessEnv): ProviderStatus[] {
-  return PROVIDERS.map((p) => ({
+/** What each provider contributes and whether it is usable, minus any `skip`ped id. */
+export function providerStatuses(
+  env: NodeJS.ProcessEnv,
+  skip: readonly string[] = [],
+): ProviderStatus[] {
+  return PROVIDERS.filter((p) => !skip.includes(p.id)).map((p) => ({
     id: p.id,
     label: p.label,
     help: p.help,
@@ -34,6 +40,11 @@ export function providerStatuses(env: NodeJS.ProcessEnv): ProviderStatus[] {
     configured: isConfigured(p, env),
   }));
 }
+
+/** Ids of the providers a browser cannot reach (see `TagProvider.serverOnly`). */
+export const SERVER_ONLY: readonly string[] = PROVIDERS.filter((p) => p.serverOnly).map(
+  (p) => p.id,
+);
 
 /** Clients for the providers that are configured and not skipped (`--skip`). */
 export function createProviderClients(

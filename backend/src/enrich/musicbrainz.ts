@@ -1,7 +1,7 @@
 import type { RawTag } from "../tagging/mapper.ts";
 import { type LookupDeps, ServiceClient } from "./lookup.ts";
-import type { ProviderClient, Resolution, TagProvider, TrackQuery } from "./provider.ts";
-import { similarity } from "./text.ts";
+import type { ProviderClient, Resolution, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
+import { similarity, yearOf } from "./text.ts";
 import type { ParsedTitle } from "./titleParser.ts";
 
 /** The cached form of a search result (kept stable so existing caches stay valid). */
@@ -26,12 +26,30 @@ const MIN_SCORE = 80;
 const MIN_SIMILARITY = 0.6;
 /** MusicBrainz tags carry vote counts rather than weights; trust them a little below Discogs. */
 const TAG_WEIGHT = 0.8;
+/** Genres are the curated subset of those tags, so they are worth a little more. */
+const GENRE_WEIGHT = 0.9;
 
 const quote = (value: string): string => `"${value.replace(/["\\]/g, "\\$&")}"`;
+
+/** The cached form of the recording lookup that follows a match. */
+export interface RecordingGenres {
+  genres: string[];
+  year?: number;
+}
+
+interface LookupResponse {
+  genres?: { name: string; count?: number }[];
+  "first-release-date"?: string;
+}
 
 /** Recording search; corrects artist/title spelling before the other providers look up tags. */
 export class MusicBrainz implements ProviderClient {
   readonly id = "musicbrainz";
+  /**
+   * The genre lookup is a second request about a track this provider already matched, so it is
+   * only worth making for the tracks nothing else could place.
+   */
+  readonly fallback = true;
   private readonly http: ServiceClient;
 
   constructor(deps: LookupDeps) {
@@ -63,12 +81,38 @@ export class MusicBrainz implements ProviderClient {
       genres: match.tags.map((t): RawTag => ({ tag: t.name, source: this.id, weight: TAG_WEIGHT })),
     };
   }
+
+  /**
+   * The matched recording's curated genres, which the search does not return. Asked only about a
+   * recording this provider's own `resolve` identified, so it costs nothing for the rest.
+   */
+  async trackTags({ externalIds }: TrackQuery): Promise<TrackTags> {
+    const mbid = externalIds?.[this.id];
+    if (!mbid) return { genres: [] };
+    const found = await this.http.get({
+      kind: "recording",
+      key: [mbid],
+      url: `https://musicbrainz.org/ws/2/recording/${mbid}?inc=genres&fmt=json`,
+      parse: (body) => parseGenres(body as LookupResponse),
+    });
+    return {
+      genres: (found?.genres ?? []).map((tag) => ({ tag, source: this.id, weight: GENRE_WEIGHT })),
+      year: found?.year,
+    };
+  }
+}
+
+/** Null when the recording carried neither a genre nor a date, so the cache can expire it. */
+export function parseGenres(body: LookupResponse | null): RecordingGenres | null {
+  const genres = (body?.genres ?? []).map((g) => g.name);
+  const year = yearOf(body?.["first-release-date"]);
+  return genres.length === 0 && year === undefined ? null : { genres, year };
 }
 
 export const musicbrainz: TagProvider = {
   id: "musicbrainz",
   label: "MusicBrainz",
-  help: "Corrects artist and title spelling. Needs no key.",
+  help: "Corrects artist and title spelling, and adds curated genres for tracks nothing else placed. Needs no key.",
   envVars: [],
   create: (deps) => new MusicBrainz(deps),
 };

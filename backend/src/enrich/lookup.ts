@@ -1,4 +1,5 @@
 import type { Cache } from "../db.ts";
+import { MISS_TTL_MS } from "./cache.ts";
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export type Sleep = (ms: number) => Promise<void>;
@@ -75,6 +76,12 @@ export interface LookupDeps {
   userAgent: string;
   fetch?: FetchLike;
   sleep?: Sleep;
+  /**
+   * Answer from the cache only, never over the network: an uncached lookup becomes "no match"
+   * (the parse of an empty body) instead of a request. Used by the tag report, which replays what
+   * the services already said without spending a single call.
+   */
+  offline?: boolean;
 }
 
 const MAX_ATTEMPTS = 3;
@@ -134,8 +141,10 @@ export class ServiceClient {
   get<T>(request: LookupRequest<T>): Promise<T> {
     const source = request.kind ? `${this.options.source}-${request.kind}` : this.options.source;
     const key = lookupKey(...request.key);
-    const cached = this.deps.store.cacheGet(source, key);
+    const cached = this.deps.store.cacheGet(source, key, MISS_TTL_MS);
     if (cached !== undefined) return Promise.resolve(cached as T);
+    // Nothing cached and no request allowed: the empty body every parse already handles.
+    if (this.deps.offline) return Promise.resolve(request.parse(null, 0));
 
     const flightKey = `${source}\u0000${key}`;
     const pending = this.inflight.get(flightKey);

@@ -20,5 +20,8 @@ export function table(headers: string[], rows: (string | number)[][]): string {
   ].join("\n");
 }
 
+export const plural = (n: number, one: string, many = `${one}s`): string =>
+  `${n} ${n === 1 ? one : many}`;
+
 export const percent = (part: number, whole: number): string =>
   whole === 0 ? "0%" : `${Math.round((100 * part) / whole)}%`;

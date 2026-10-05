@@ -8,7 +8,8 @@ import { type Config, loadConfig, VERSION } from "./config.ts";
 import { DIMENSIONS, type Dimension, Store } from "./db.ts";
 import { enrichPlaylist } from "./enrich/pipeline.ts";
 import { PROVIDERS, providerStatuses } from "./enrich/providers.ts";
-import { percent, table } from "./format.ts";
+import { tagReport } from "./enrich/report.ts";
+import { percent, plural, table } from "./format.ts";
 import { estimateQuota, planGroups } from "./planner.ts";
 import { startServer } from "./server/index.ts";
 import { createEnrichers, fetchPlaylist, youtubeFor } from "./services.ts";
@@ -50,7 +51,7 @@ async function confirm(question: string): Promise<boolean> {
 const program = new Command()
   .name("sortify")
   .description(
-    "Split large YouTube / YouTube Music playlists into sub-playlists by subgenre, mood or song type.",
+    "Split large YouTube / YouTube Music playlists into sub-playlists by subgenre, mood, song type, language or decade.",
   )
   .version(VERSION);
 
@@ -84,7 +85,7 @@ program
 program
   .command("enrich")
   .description(
-    `Tag tracks with subgenre, mood and song type (providers: ${PROVIDERS.map((p) => p.id).join(", ")})`,
+    `Tag tracks with subgenre, mood, song type, language and decade (providers: ${PROVIDERS.map((p) => p.id).join(", ")})`,
   )
   .argument("<playlist>", "playlist URL or ID (must be fetched first)")
   .option("--force", "re-process tracks that were already enriched (cached lookups are reused)")
@@ -119,6 +120,11 @@ program
         if (summary.retryLater > 0) {
           out(
             `${summary.retryLater} tracks missed a source that did not answer; run the same command again to retry them.`,
+          );
+        }
+        if (summary.propagated > 0) {
+          out(
+            `${summary.propagated} tracks took a subgenre from the same artist's other tracks here.`,
           );
         }
         if (summary.stoppedByBudget) {
@@ -263,6 +269,60 @@ program
       }
     },
   );
+
+program
+  .command("tags")
+  .description(
+    "Report tag coverage and the raw tags the tag map drops (reads the cache; no API calls)",
+  )
+  .argument("<playlist>", "playlist URL or ID (must be fetched first)")
+  .action(async (input: string) => {
+    const config = loadConfig();
+    const store = openStore(config);
+    try {
+      const { playlistId, title } = requireFetched(store, input);
+      // Offline: every lookup is answered from the cache, so this costs nothing and writes nothing.
+      const { enrichers } = createEnrichers(config, store, { offline: true });
+      const report = await tagReport(store, playlistId, enrichers);
+      out(`"${title}": ${plural(report.total, "track")}\n`);
+      out(
+        table(
+          ["Dimension", "Tracks", "Coverage", "Playlists"],
+          report.dimensions.map((d) => [
+            d.dimension,
+            d.tracks,
+            percent(d.tracks, report.total),
+            d.values,
+          ]),
+        ),
+      );
+      out("");
+      out(
+        table(
+          ["Source", "Tracks", "Tags"],
+          report.sources.map((s) => [s.source, s.tracks, s.tags]),
+        ),
+      );
+      out(
+        `\nTitles with no artist and song name: ${report.unparsed}. ` +
+          `Tracks no service has an answer cached for: ${report.unanswered}.`,
+      );
+      if (report.unmapped.length === 0) {
+        out("\nEvery tag the services gave has a label. Nothing to add to the tag map.");
+      } else {
+        out("\nTags with no label, most common first. Add the ones worth keeping to the tag map:");
+        out("");
+        out(
+          table(
+            ["Tag", "Tracks", "From"],
+            report.unmapped.map((u) => [u.tag, u.tracks, u.sources.join(", ")]),
+          ),
+        );
+      }
+    } finally {
+      store.close();
+    }
+  });
 
 program
   .command("status")

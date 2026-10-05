@@ -22,7 +22,11 @@ import { applyRun, type Privacy } from "../../backend/src/apply.ts";
 import type { Cache } from "../../backend/src/db.ts";
 import { Budget, type LookupDeps } from "../../backend/src/enrich/lookup.ts";
 import { type Enrichers, enrichPlaylist } from "../../backend/src/enrich/pipeline.ts";
-import { createProviderClients, providerStatuses } from "../../backend/src/enrich/providers.ts";
+import {
+  createProviderClients,
+  providerStatuses,
+  SERVER_ONLY,
+} from "../../backend/src/enrich/providers.ts";
 import { planGroups } from "../../backend/src/planner.ts";
 import { JobBusyError, JobRunner } from "../../backend/src/server/jobs.ts";
 import {
@@ -99,7 +103,11 @@ function enrichers(maxApiCalls?: number): { enrichers: Enrichers; budget: Budget
   };
   return {
     budget,
-    enrichers: { mapper: new TagMapper(), clients: createProviderClients(deps, getKeys()) },
+    enrichers: {
+      mapper: new TagMapper(),
+      // Nothing a browser cannot read: those services answer with no CORS origin header.
+      clients: createProviderClients(deps, getKeys(), SERVER_ONLY),
+    },
   };
 }
 
@@ -140,7 +148,7 @@ const routes: [string, RegExp, Handler][] = [
         ? null
         : "Open Connections in the top bar and pick YouTube to add your Google client ID and secret.",
       signedIn: isSignedIn(),
-      sources: providerStatuses(getKeys()),
+      sources: providerStatuses(getKeys(), SERVER_ONLY),
       dailyQuota: DAILY_QUOTA,
       sync: sync ? syncView(sync.status()) : null,
       opensInMusic: musicLinks !== undefined,
@@ -269,6 +277,9 @@ const routes: [string, RegExp, Handler][] = [
         let message = `Tagged ${summary.enriched} tracks with ${budget.used} API calls`;
         if (summary.retryLater > 0) {
           message += `; ${summary.retryLater} missed a source that did not answer and will be retried next time`;
+        }
+        if (summary.propagated > 0) {
+          message += `; ${summary.propagated} took a subgenre from the same artist`;
         }
         if (summary.stoppedByBudget) message += "; stopped at the API call limit";
         if (summary.remaining > 0) message += `; ${summary.remaining} left`;

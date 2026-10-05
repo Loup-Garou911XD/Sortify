@@ -316,6 +316,9 @@ export function createApp(deps: AppDeps) {
             if (summary.retryLater > 0) {
               message += `; ${summary.retryLater} missed a source that did not answer and will be retried next time`;
             }
+            if (summary.propagated > 0) {
+              message += `; ${summary.propagated} took a subgenre from the same artist`;
+            }
             if (summary.stoppedByBudget) message += `; stopped at the API call limit`;
             if (summary.remaining > 0) message += `; ${summary.remaining} left`;
             return message;

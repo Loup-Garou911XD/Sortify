@@ -96,11 +96,18 @@ export function EmptyState({
   );
 }
 
+/** Tags Sortify works out itself, rather than any provider's. */
+const SOURCE_NAMES: Record<string, string> = {
+  rule: "title rule",
+  agreement: "same artist",
+};
+
 export function TagChip({ tag }: { tag: TrackTagView }) {
   const { status } = useApp();
   const source =
     status?.sources.find((s) => s.id === tag.source)?.label ??
-    (tag.source === "rule" ? "title rule" : tag.source);
+    SOURCE_NAMES[tag.source] ??
+    tag.source;
   return (
     <span
       className={`chip chip-${tag.dimension}`}

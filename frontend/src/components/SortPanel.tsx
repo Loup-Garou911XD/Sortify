@@ -28,6 +28,8 @@ const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "subgenre", label: "Subgenre" },
   { value: "mood", label: "Mood" },
   { value: "type", label: "Song type" },
+  { value: "language", label: "Language" },
+  { value: "decade", label: "Decade" },
 ];
 
 export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: TrackView[] }) {
@@ -35,7 +37,7 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   const [dimension, setDimension] = useState<Dimension>("subgenre");
   const [minSize, setMinSize] = useState(5);
   const [maxGroups, setMaxGroups] = useState(0);
-  const [leftovers, setLeftovers] = useState(true);
+  const [leftovers, setLeftovers] = useState(false);
   // Debounce a string so an unchanged setting never looks new and refetches.
   const settingsKey = useDebounced(
     JSON.stringify({ dimension, minSize, maxGroups, leftovers }),
@@ -100,7 +102,15 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
     setEdited(true);
   };
 
+  const includeAll = (on: boolean) => {
+    setDrafts((ds) => ds.map((d) => (d.included === on ? d : { ...d, included: on })));
+    setEdited(true);
+  };
+
   const included = drafts.filter((d) => d.included && d.videoIds.length > 0);
+  // Checkbox state, which is what the Select/Deselect all buttons act on: a card whose
+  // tracks were all removed stays checked but never becomes a playlist.
+  const checked = drafts.filter((d) => d.included).length;
   const untagged = tracks.filter((t) => !t.enriched).length;
   const noneTagged = untagged === tracks.length;
   const additions = included.reduce((sum, d) => sum + d.videoIds.length, 0);
@@ -283,92 +293,109 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
               Tag the tracks first, or lower the smallest playlist size.
             </EmptyState>
           ) : (
-            <div className="groups">
-              {drafts.map((d) => {
-                const rows = shownRows.get(d.key) ?? PREVIEW_ROWS;
-                const shown = d.videoIds.slice(0, rows);
-                const hidden = d.videoIds.length - shown.length;
-                const cls = ["group", d.included ? "" : "excluded", d.leftover ? "leftover" : ""]
-                  .filter(Boolean)
-                  .join(" ");
-                return (
-                  <article key={d.key} className={cls}>
-                    <header className="group-head">
-                      <input
-                        type="checkbox"
-                        checked={d.included}
-                        aria-label={`Create playlist ${d.name}`}
-                        onChange={(e) =>
-                          update(d.key, (x) => ({ ...x, included: e.target.checked }))
-                        }
-                      />
-                      <input
-                        className="group-name"
-                        value={d.name}
-                        maxLength={100}
-                        aria-label="Playlist name"
-                        onChange={(e) => update(d.key, (x) => ({ ...x, name: e.target.value }))}
-                      />
-                      <span className="group-count" title="Tracks">
-                        {fmt(d.videoIds.length)}
-                      </span>
-                    </header>
-                    <div
-                      className="group-share"
-                      aria-hidden
-                      title={`${fmt(d.videoIds.length)} of ${fmt(largest)} in the biggest group`}
-                    >
-                      <span style={{ width: `${(100 * d.videoIds.length) / largest}%` }} />
-                    </div>
-                    {d.leftover && (
-                      <p className="group-note">
-                        {d.name === "Unsorted"
-                          ? "No tags found for these tracks."
-                          : "Their groups were too small to keep."}
-                      </p>
-                    )}
-                    <ul className="group-tracks">
-                      {shown.map((id) => (
-                        <li key={id}>
-                          <span className="ellipsis" title={label(id)}>
-                            {label(id)}
-                          </span>
-                          <button
-                            type="button"
-                            className="row-btn"
-                            aria-label={`Remove ${label(id)} from ${d.name}`}
-                            title="Remove from this playlist"
-                            onClick={() =>
-                              update(d.key, (x) => ({
-                                ...x,
-                                videoIds: x.videoIds.filter((v) => v !== id),
-                              }))
-                            }
-                          >
-                            <IconClose size={13} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                    {d.videoIds.length > PREVIEW_ROWS && (
-                      <button
-                        type="button"
-                        className="link small"
-                        onClick={() =>
-                          setShownRows((m) =>
-                            new Map(m).set(d.key, hidden > 0 ? rows + MORE_ROWS : PREVIEW_ROWS),
-                          )
-                        }
+            <>
+              <div className="groups-bar">
+                <span className="muted small" aria-live="polite">
+                  {checked} of {plural(drafts.length, "playlist")} selected
+                </span>
+                <Button variant="ghost" disabled={checked === 0} onClick={() => includeAll(false)}>
+                  Deselect all
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={checked === drafts.length}
+                  onClick={() => includeAll(true)}
+                >
+                  Select all
+                </Button>
+              </div>
+              <div className="groups">
+                {drafts.map((d) => {
+                  const rows = shownRows.get(d.key) ?? PREVIEW_ROWS;
+                  const shown = d.videoIds.slice(0, rows);
+                  const hidden = d.videoIds.length - shown.length;
+                  const cls = ["group", d.included ? "" : "excluded", d.leftover ? "leftover" : ""]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <article key={d.key} className={cls}>
+                      <header className="group-head">
+                        <input
+                          type="checkbox"
+                          checked={d.included}
+                          aria-label={`Create playlist ${d.name}`}
+                          onChange={(e) =>
+                            update(d.key, (x) => ({ ...x, included: e.target.checked }))
+                          }
+                        />
+                        <input
+                          className="group-name"
+                          value={d.name}
+                          maxLength={100}
+                          aria-label="Playlist name"
+                          onChange={(e) => update(d.key, (x) => ({ ...x, name: e.target.value }))}
+                        />
+                        <span className="group-count" title="Tracks">
+                          {fmt(d.videoIds.length)}
+                        </span>
+                      </header>
+                      <div
+                        className="group-share"
+                        aria-hidden
+                        title={`${fmt(d.videoIds.length)} of ${fmt(largest)} in the biggest group`}
                       >
-                        {hidden > 0
-                          ? `Show ${fmt(Math.min(MORE_ROWS, hidden))} more`
-                          : "Show fewer"}
-                      </button>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
+                        <span style={{ width: `${(100 * d.videoIds.length) / largest}%` }} />
+                      </div>
+                      {d.leftover && (
+                        <p className="group-note">
+                          {d.name === "Unsorted"
+                            ? "No tags found for these tracks."
+                            : "Their groups were too small to keep."}
+                        </p>
+                      )}
+                      <ul className="group-tracks">
+                        {shown.map((id) => (
+                          <li key={id}>
+                            <span className="ellipsis" title={label(id)}>
+                              {label(id)}
+                            </span>
+                            <button
+                              type="button"
+                              className="row-btn"
+                              aria-label={`Remove ${label(id)} from ${d.name}`}
+                              title="Remove from this playlist"
+                              onClick={() =>
+                                update(d.key, (x) => ({
+                                  ...x,
+                                  videoIds: x.videoIds.filter((v) => v !== id),
+                                }))
+                              }
+                            >
+                              <IconClose size={13} />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {d.videoIds.length > PREVIEW_ROWS && (
+                        <button
+                          type="button"
+                          className="link small"
+                          onClick={() =>
+                            setShownRows((m) =>
+                              new Map(m).set(d.key, hidden > 0 ? rows + MORE_ROWS : PREVIEW_ROWS),
+                            )
+                          }
+                        >
+                          {hidden > 0
+                            ? `Show ${fmt(Math.min(MORE_ROWS, hidden))} more`
+                            : "Show fewer"}
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           {preview.dropped.length > 0 && (

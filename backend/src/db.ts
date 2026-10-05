@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { DIMENSIONS, type Dimension, type TagSource } from "./api/types.ts";
+import { isCachedMiss } from "./enrich/cache.ts";
 import {
   type MergeNotes,
   mergeSnapshots,
@@ -167,6 +168,8 @@ const RUN_COLUMNS = `run_id AS runId, source_playlist_id AS sourcePlaylistId, di
   writes_done AS writesDone`;
 
 const now = (): string => new Date().toISOString();
+/** Stands in for "we do not know when", which is as good as very old. */
+const EPOCH = new Date(0).toISOString();
 
 /** Thin typed layer over the SQLite cache. Every stage reads and writes through it. */
 /**
@@ -382,6 +385,21 @@ export class Store implements Syncable {
     });
   }
 
+  /**
+   * Adds tags to a track without touching the ones it has, for a pass that infers rather than
+   * looks up (see agreement.ts). The next real tagging of the track rewrites them all.
+   */
+  addTags(videoId: string, tags: Tag[]): void {
+    this.tx(() => {
+      const insert = this.prep(
+        `INSERT INTO track_tags (video_id, dimension, value, raw_tag, source, weight)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO UPDATE SET weight = max(weight, excluded.weight)`,
+      );
+      for (const t of tags) insert.run(videoId, t.dimension, t.value, t.rawTag, t.source, t.weight);
+    });
+  }
+
   playlistTags(playlistId: string, dimension: Dimension): TrackTag[] {
     return this.prep(
       `SELECT g.video_id AS videoId, g.dimension, g.value, g.raw_tag AS rawTag, g.source, g.weight
@@ -390,12 +408,21 @@ export class Store implements Syncable {
     ).all(playlistId, dimension) as unknown as TrackTag[];
   }
 
-  cacheGet(source: string, key: string): unknown {
-    const row = this.prep("SELECT body FROM lookup_cache WHERE source = ? AND key = ?").get(
-      source,
-      key,
-    ) as { body: string } | undefined;
-    return row === undefined ? undefined : JSON.parse(row.body);
+  /**
+   * The cached value, or undefined when there is none. `missTtlMs` expires cached "no match"
+   * answers (see isCachedMiss): a miss older than that reads as absent, so the provider asks
+   * again, while a real match is kept for good.
+   */
+  cacheGet(source: string, key: string, missTtlMs?: number): unknown {
+    const row = this.prep(
+      "SELECT body, fetched_at AS fetchedAt FROM lookup_cache WHERE source = ? AND key = ?",
+    ).get(source, key) as { body: string; fetchedAt: string } | undefined;
+    if (row === undefined) return undefined;
+    const body: unknown = JSON.parse(row.body);
+    if (missTtlMs !== undefined && isCachedMiss(body)) {
+      if (Date.parse(row.fetchedAt) + missTtlMs < Date.now()) return undefined;
+    }
+    return body;
   }
 
   cachePut(source: string, key: string, body: unknown): void {
@@ -628,9 +655,14 @@ export class Store implements Syncable {
         enrichedAt: t.enrichedAt,
       })),
       tags: [...tags].map(([videoId, list]) => ({ videoId, tags: list })),
-      cache: rows<{ source: string; key: string; body: string }>(
-        "SELECT source, key, body FROM lookup_cache",
-      ).map((c) => ({ source: c.source, key: c.key, body: JSON.parse(c.body) as unknown })),
+      cache: rows<{ source: string; key: string; body: string; fetchedAt: string }>(
+        "SELECT source, key, body, fetched_at AS fetchedAt FROM lookup_cache",
+      ).map((c) => ({
+        source: c.source,
+        key: c.key,
+        body: JSON.parse(c.body) as unknown,
+        fetchedAt: c.fetchedAt,
+      })),
       deleted: rows<{ playlistId: string; at: string }>(
         "SELECT playlist_id AS playlistId, deleted_at AS at FROM deleted_playlists",
       ),
@@ -707,7 +739,9 @@ export class Store implements Syncable {
         "INSERT INTO lookup_cache (source, key, body, fetched_at) VALUES (?, ?, ?, ?)",
       );
       for (const c of merged.cache) {
-        cache.run(c.source, c.key, JSON.stringify(c.body), merged.updatedAt);
+        // An entry from a device that did not carry the time keeps its own age: "long ago", so a
+        // cached "no match" in it is asked once more rather than standing for ever.
+        cache.run(c.source, c.key, JSON.stringify(c.body), c.fetchedAt ?? EPOCH);
       }
       const grave = this.prep(
         "INSERT INTO deleted_playlists (playlist_id, deleted_at) VALUES (?, ?)",
