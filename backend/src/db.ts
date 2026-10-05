@@ -125,6 +125,14 @@ CREATE TABLE IF NOT EXISTS deleted_playlists (
   playlist_id TEXT PRIMARY KEY,
   deleted_at  TEXT NOT NULL
 );
+-- Deleted plans, named the way a merge names them: by when they were made and what from,
+-- never by run id, which is a local counter that a merge may change.
+CREATE TABLE IF NOT EXISTS deleted_runs (
+  created_at         TEXT NOT NULL,
+  source_playlist_id TEXT NOT NULL,
+  deleted_at         TEXT NOT NULL,
+  PRIMARY KEY (created_at, source_playlist_id)
+);
 
 CREATE TABLE IF NOT EXISTS lookup_cache (
   source     TEXT NOT NULL,
@@ -441,11 +449,18 @@ export class Store implements Syncable {
     groups: PlannedGroup[],
   ): number {
     return this.tx(() => {
+      const createdAt = now();
       const { lastInsertRowid } = this.prep(
         `INSERT INTO runs (source_playlist_id, dimension, min_size, created_at, status)
            VALUES (?, ?, ?, ?, 'planned')`,
-      ).run(sourcePlaylistId, dimension, minSize, now());
+      ).run(sourcePlaylistId, dimension, minSize, createdAt);
       const runId = Number(lastInsertRowid);
+      // Making a plan is a later intent than deleting one, so it clears any grave of its own
+      // identity (see RunTombstone), exactly as re-fetching a playlist clears its tombstone.
+      this.prep("DELETE FROM deleted_runs WHERE created_at = ? AND source_playlist_id = ?").run(
+        createdAt,
+        sourcePlaylistId,
+      );
       const addGroup = this.prep("INSERT INTO run_groups (run_id, name) VALUES (?, ?)");
       const addItem = this.prep(
         "INSERT INTO run_items (group_id, video_id, position) VALUES (?, ?, ?)",
@@ -579,11 +594,19 @@ export class Store implements Syncable {
 
   deleteRun(runId: number): void {
     this.tx(() => {
+      const run = this.getRun(runId);
       this.prep(
         "DELETE FROM run_items WHERE group_id IN (SELECT group_id FROM run_groups WHERE run_id = ?)",
       ).run(runId);
       this.prep("DELETE FROM run_groups WHERE run_id = ?").run(runId);
       this.prep("DELETE FROM runs WHERE run_id = ?").run(runId);
+      // Remembered, or the next sync takes the copy another device still holds and hands it back.
+      if (run) {
+        this.prep(
+          `INSERT INTO deleted_runs (created_at, source_playlist_id, deleted_at) VALUES (?, ?, ?)
+             ON CONFLICT (created_at, source_playlist_id) DO UPDATE SET deleted_at = excluded.deleted_at`,
+        ).run(run.createdAt, run.sourcePlaylistId, now());
+      }
     });
   }
 
@@ -666,6 +689,10 @@ export class Store implements Syncable {
       deleted: rows<{ playlistId: string; at: string }>(
         "SELECT playlist_id AS playlistId, deleted_at AS at FROM deleted_playlists",
       ),
+      deletedRuns: rows<{ createdAt: string; sourcePlaylistId: string; at: string }>(
+        `SELECT created_at AS createdAt, source_playlist_id AS sourcePlaylistId,
+                deleted_at AS at FROM deleted_runs`,
+      ),
       runs: this.listRuns().map((run) => ({
         ...run,
         groups: (groups.get(run.runId) ?? []).map((g) => ({
@@ -693,6 +720,7 @@ export class Store implements Syncable {
         "playlists",
         "lookup_cache",
         "deleted_playlists",
+        "deleted_runs",
       ]) {
         this.prep(`DELETE FROM ${table}`).run();
       }
@@ -747,6 +775,10 @@ export class Store implements Syncable {
         "INSERT INTO deleted_playlists (playlist_id, deleted_at) VALUES (?, ?)",
       );
       for (const t of merged.deleted) grave.run(t.playlistId, t.at);
+      const runGrave = this.prep(
+        "INSERT INTO deleted_runs (created_at, source_playlist_id, deleted_at) VALUES (?, ?, ?)",
+      );
+      for (const t of merged.deletedRuns) runGrave.run(t.createdAt, t.sourcePlaylistId, t.at);
       const run = this.prep(
         `INSERT INTO runs (run_id, source_playlist_id, dimension, min_size, created_at, status,
            quota_used, writes_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

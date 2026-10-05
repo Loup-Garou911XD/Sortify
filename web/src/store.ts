@@ -23,6 +23,7 @@ import { isCachedMiss } from "../../backend/src/enrich/cache.ts";
 import {
   type MergeNotes,
   mergeSnapshots,
+  type RunTombstone,
   SNAPSHOT_VERSION,
   type Snapshot,
   type Syncable,
@@ -49,6 +50,9 @@ interface CacheEntry {
   body: unknown;
   at: number;
 }
+
+/** The identity a merge knows a run by; see RunTombstone. */
+const runGraveKey = (t: RunTombstone): string => t.createdAt + SEP + t.sourcePlaylistId;
 
 const cacheEntry = (stored: unknown): CacheEntry =>
   stored !== null && typeof stored === "object" && "at" in stored && "body" in stored
@@ -92,6 +96,8 @@ interface RunHeader {
   runs: Run[];
   groups: RunGroup[];
   seq: { run: number; group: number };
+  /** Plans deleted here, so a sync cannot hand them back. Absent in records written before. */
+  deletedRuns?: RunTombstone[];
 }
 
 /** A copy of the collections a transaction can touch, kept so `tx` can undo a failure. */
@@ -190,6 +196,8 @@ export class BrowserStore implements Syncable {
   /** playlistId -> when it was deleted here. */
   private readonly deleted = new Map<string, string>();
   private runs: Run[] = [];
+  /** Deleted plans by `createdAt`+`sourcePlaylistId`, the identity a merge knows them by. */
+  private deletedRuns = new Map<string, RunTombstone>();
   private groups: RunGroup[] = [];
   private readonly items = new Map<number, RunItem[]>();
   private seq = { run: 0, group: 0 };
@@ -266,6 +274,7 @@ export class BrowserStore implements Syncable {
       this.runs = header.runs;
       this.groups = header.groups;
       this.seq = header.seq;
+      for (const t of header.deletedRuns ?? []) this.deletedRuns.set(runGraveKey(t), t);
     }
   }
 
@@ -329,7 +338,12 @@ export class BrowserStore implements Syncable {
       case "deleted":
         return this.deleted.get(key);
       default:
-        return { runs: this.runs, groups: this.groups, seq: this.seq };
+        return {
+          runs: this.runs,
+          groups: this.groups,
+          seq: this.seq,
+          deletedRuns: [...this.deletedRuns.values()],
+        };
     }
   }
 
@@ -553,16 +567,19 @@ export class BrowserStore implements Syncable {
   ): number {
     return this.tx(() => {
       const runId = ++this.seq.run;
+      const createdAt = now();
       this.runs.push({
         runId,
         sourcePlaylistId,
         dimension,
         minSize,
-        createdAt: now(),
+        createdAt,
         status: "planned",
         quotaUsed: 0,
         writesDone: 0,
       });
+      // See the SQLite store: a new plan clears any grave that shares its identity.
+      this.deletedRuns.delete(runGraveKey({ createdAt, sourcePlaylistId, at: "" }));
       for (const group of groups) {
         const groupId = ++this.seq.group;
         this.groups.push({ groupId, runId, name: group.name, targetPlaylistId: null });
@@ -646,7 +663,17 @@ export class BrowserStore implements Syncable {
         this.touch("items", g.groupId);
       }
       this.groups = this.groups.filter((g) => g.runId !== runId);
+      const gone = this.runs.find((r) => r.runId === runId);
       this.runs = this.runs.filter((r) => r.runId !== runId);
+      // Remembered, or the next sync takes the copy another device still holds and hands it back.
+      if (gone) {
+        const grave = {
+          createdAt: gone.createdAt,
+          sourcePlaylistId: gone.sourcePlaylistId,
+          at: now(),
+        };
+        this.deletedRuns.set(runGraveKey(grave), grave);
+      }
       this.touchRuns();
     });
   }
@@ -737,6 +764,7 @@ export class BrowserStore implements Syncable {
         };
       }),
       deleted: [...this.deleted].map(([playlistId, at]) => ({ playlistId, at })),
+      deletedRuns: [...this.deletedRuns.values()],
       runs: this.runs.map((run) => ({
         ...run,
         groups: this.runGroups(run.runId).map((g) => ({
@@ -799,6 +827,8 @@ export class BrowserStore implements Syncable {
       this.cache.set(id, { body: c.body, at: c.fetchedAt ? Date.parse(c.fetchedAt) : 0 });
       this.touch("cache", id);
     }
+    this.deletedRuns.clear();
+    for (const t of merged.deletedRuns) this.deletedRuns.set(runGraveKey(t), t);
     this.runs = merged.runs.map(({ groups: _groups, ...run }) => run);
     this.groups = merged.runs.flatMap((run) =>
       run.groups.map((g) => ({

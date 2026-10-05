@@ -80,6 +80,14 @@ JSON through its `.env` import.
   winning, tags following the winning track, the lookup cache unioned, playlists taking the newer
   fetch whole. Details that cost YouTube quota (`durationS`, `topics`) are kept from whichever
   side has them, even when the other copy wins.
+- **A delete needs a tombstone.** Merging is a union, so anything simply missing on one side
+  comes back from the other, and one device is enough: its own last push still holds what it just
+  deleted. Deleted playlists are remembered in `deleted_playlists` and deleted plans in
+  `deleted_runs`, both travelling in the snapshot (`deleted`, `deletedRuns`). A plan's tombstone
+  names it by identity (`createdAt` + source playlist), never by run id, since ids are local
+  counters a merge may renumber. Re-creating clears the grave: a playlist fetched again outlives
+  its tombstone, and `createRun` drops any grave sharing the new plan's identity. Both expire
+  after `TOMBSTONE_DAYS`.
 - **Run ids are the one hazard.** They are local counters on both sides, so two devices both mint
   "run 3". A colliding run is renumbered — *except* when `idsAreFrozen()`: a run that has started
   applying and still has a group with no recorded target may have a `[sortify run N group M]`

@@ -95,6 +95,19 @@ export interface Tombstone {
   at: string;
 }
 
+/**
+ * A deleted run. It names the run the way `identity` does rather than by id, because ids are
+ * local counters that a merge may renumber: the same plan can be run 3 here and run 7 there.
+ * Nothing resurrects a run, unlike a playlist: making a plan again gives it a new `createdAt`,
+ * so the new one has an identity of its own and no tombstone to clear.
+ */
+export interface RunTombstone {
+  createdAt: string;
+  sourcePlaylistId: string;
+  /** When it was deleted. */
+  at: string;
+}
+
 export interface Snapshot {
   version: number;
   updatedAt: string;
@@ -105,6 +118,8 @@ export interface Snapshot {
   runs: RunSnapshot[];
   /** Playlists deleted on some device, so a merge does not resurrect them. */
   deleted: Tombstone[];
+  /** Plans deleted on some device, for the same reason. */
+  deletedRuns: RunTombstone[];
   /** Highest ids handed out so far, so neither side reuses one after a merge. */
   seq: { run: number; group: number };
 }
@@ -129,6 +144,7 @@ export const emptySnapshot = (): Snapshot => ({
   cache: [],
   runs: [],
   deleted: [],
+  deletedRuns: [],
   seq: { run: 0, group: 0 },
 });
 
@@ -153,6 +169,7 @@ export function idsAreFrozen(run: RunSnapshot): boolean {
  * copy it already made instead of renumbering it again and again.
  */
 const identity = (run: RunSnapshot): string => `${run.createdAt}\u0000${run.sourcePlaylistId}`;
+const graveKey = (t: RunTombstone): string => `${t.createdAt}\u0000${t.sourcePlaylistId}`;
 
 /**
  * Combines one run's progress from both sides. Applying only ever moves forward — a target gets
@@ -328,7 +345,18 @@ export function mergeSnapshots(
     run: Math.max(local.seq.run, remote.seq.run),
     group: Math.max(local.seq.group, remote.seq.group),
   };
-  const runs = mergeRuns(local.runs, remote.runs, seq, notes);
+
+  // Deleted plans, by identity rather than id. Filtered out before the merge rather than after,
+  // so a buried run is never renumbered, never counted as brought in, and never pushed back to
+  // the device that still holds it.
+  const runGraves = new Map<string, RunTombstone>();
+  for (const t of [...local.deletedRuns, ...remote.deletedRuns]) {
+    const seen = runGraves.get(graveKey(t));
+    if (!seen || t.at > seen.at) runGraves.set(graveKey(t), t);
+  }
+  const alive = (run: RunSnapshot): boolean => !runGraves.has(identity(run));
+  notes.removed.runs = local.runs.filter((r) => !alive(r)).length;
+  const runs = mergeRuns(local.runs.filter(alive), remote.runs.filter(alive), seq, notes);
 
   // Apply the deletions. A playlist fetched again after it was deleted outlives its tombstone:
   // the user deliberately re-added it, which is a later intent than the delete.
@@ -356,7 +384,7 @@ export function mergeSnapshots(
   notes.removed.tracks = local.tracks.filter((t) => orphaned.has(t.videoId)).length;
 
   const keptRuns = runs.filter((r) => !buried.has(r.sourcePlaylistId));
-  notes.removed.runs = local.runs.filter((r) => buried.has(r.sourcePlaylistId)).length;
+  notes.removed.runs += local.runs.filter((r) => alive(r) && buried.has(r.sourcePlaylistId)).length;
 
   const cutoff = new Date(Date.now() - TOMBSTONE_DAYS * 86_400_000).toISOString();
 
@@ -370,6 +398,10 @@ export function mergeSnapshots(
       cache: [...cache.values()],
       runs: keptRuns,
       deleted: [...tombstones.values()].filter((t) => t.at > cutoff),
+      // A plan whose playlist is gone needs no tombstone of its own: the playlist's buries it.
+      deletedRuns: [...runGraves.values()].filter(
+        (t) => t.at > cutoff && !buried.has(t.sourcePlaylistId),
+      ),
       seq,
     },
     notes,
@@ -403,6 +435,7 @@ export function normalizeSnapshot(raw: Partial<Snapshot> | null | undefined): Sn
     cache: Array.isArray(raw.cache) ? raw.cache : [],
     runs: Array.isArray(raw.runs) ? raw.runs.map((r) => ({ ...r, groups: r.groups ?? [] })) : [],
     deleted: Array.isArray(raw.deleted) ? raw.deleted : [],
+    deletedRuns: Array.isArray(raw.deletedRuns) ? raw.deletedRuns : [],
     seq: {
       run: Number(raw.seq?.run) || 0,
       group: Number(raw.seq?.group) || 0,

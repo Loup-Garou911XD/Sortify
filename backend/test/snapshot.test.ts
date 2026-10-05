@@ -257,6 +257,58 @@ describe("mergeSnapshots: deletions", () => {
   });
 });
 
+describe("mergeSnapshots: deleted plans", () => {
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const grave = (createdAt: string, at: string) => ({
+    createdAt,
+    sourcePlaylistId: "PL1",
+    at,
+  });
+
+  it("does not let the remote copy bring a deleted plan back", () => {
+    // The reported bug: one device is enough, because its own last push still holds the plan.
+    const deletedHere = snap({ deletedRuns: [grave("2026-01-01T00:00:00.000Z", ago(1))] });
+    const stillHasIt = snap({ runs: [run(3)], seq: { run: 3, group: 30 } });
+    const { merged, notes } = mergeSnapshots(deletedHere, stillHasIt);
+    assert.deepEqual(merged.runs, [], "the plan stays deleted");
+    assert.equal(notes.added.runs, 0, "and is not reported as brought in");
+    assert.equal(merged.deletedRuns.length, 1, "the tombstone travels on");
+  });
+
+  it("carries the deletion to the device that still had it", () => {
+    const stillHasIt = snap({ runs: [run(3)], seq: { run: 3, group: 30 } });
+    const deletedElsewhere = snap({ deletedRuns: [grave("2026-01-01T00:00:00.000Z", ago(1))] });
+    const { merged, notes } = mergeSnapshots(stillHasIt, deletedElsewhere);
+    assert.deepEqual(merged.runs, []);
+    assert.equal(notes.removed.runs, 1, "and it is reported, so an open plan page moves on");
+    assert.equal(isQuiet(notes), false);
+  });
+
+  it("buries the plan whatever id each side gave it", () => {
+    // Ids are local counters: the same plan is run 3 here and run 7 there.
+    const deletedHere = snap({ deletedRuns: [grave("2026-01-01T00:00:00.000Z", ago(1))] });
+    const renumbered = snap({ runs: [run(7)], seq: { run: 7, group: 70 } });
+    assert.deepEqual(mergeSnapshots(deletedHere, renumbered).merged.runs, []);
+  });
+
+  it("keeps a plan made again after the delete", () => {
+    const planned = run(4, { createdAt: ago(1) });
+    const remade = snap({ runs: [planned], seq: { run: 4, group: 40 } });
+    const oldDelete = snap({ deletedRuns: [grave("2026-01-01T00:00:00.000Z", ago(10))] });
+    const { merged } = mergeSnapshots(remade, oldDelete);
+    assert.equal(merged.runs.length, 1, "a new plan is a new identity, not the buried one");
+  });
+
+  it("settles after one round rather than flapping", () => {
+    const deletedHere = snap({ deletedRuns: [grave("2026-01-01T00:00:00.000Z", ago(1))] });
+    const stillHasIt = snap({ runs: [run(3)], seq: { run: 3, group: 30 } });
+    const first = mergeSnapshots(deletedHere, stillHasIt).merged;
+    const second = mergeSnapshots(first, stillHasIt);
+    assert.deepEqual(second.merged.runs, []);
+    assert.equal(isQuiet(second.notes), true, "a second pass changes nothing");
+  });
+});
+
 describe("mergeSnapshots: runs", () => {
   it("combines progress when both sides hold the same run", () => {
     const base = run(1, { status: "paused" });
