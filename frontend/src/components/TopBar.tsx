@@ -5,6 +5,7 @@ import { api } from "../api.ts";
 import type { Theme } from "../hooks.ts";
 import {
   IconClose,
+  IconGitHub,
   IconInbox,
   IconMenu,
   IconMonitor,
@@ -16,6 +17,9 @@ import {
   IconSun,
 } from "./icons.tsx";
 import { Button, Menu, MenuItem } from "./ui.tsx";
+
+/** Where the source lives; shown in the top bar and the only outward link the app carries. */
+const REPO_URL = "https://github.com/Loup-Garou911XD/Sortify";
 
 /**
  * How a connection reads at a glance: working, not set up, busy, or broken. The dot and the
@@ -367,6 +371,17 @@ export function TopBar({
             )}
           </Menu>
         )}
+
+        <a
+          className="btn btn-ghost btn-icon"
+          href={REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Sortify on GitHub"
+          title="Sortify on GitHub"
+        >
+          <IconGitHub size={16} />
+        </a>
 
         <Button
           variant="ghost"
