@@ -137,7 +137,6 @@ h2 {
 /* Every number in this app is read against another number: keep the columns aligned. */
 .num,
 .tabular,
-.stat-value,
 .count,
 .group-count,
 .jobbar time {
@@ -1205,35 +1204,6 @@ li:hover > .row-btn,
   }
 }
 
-/* ---------- stats ---------- */
-
-.stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 20px;
-}
-.stat {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-2);
-  padding: 12px 14px 13px;
-  display: grid;
-  gap: 8px;
-}
-.stat-value {
-  font-size: 25px;
-  font-weight: 650;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  margin-top: 2px;
-}
-.stat-sub {
-  font-size: 11.5px;
-  color: var(--ink-2);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------- tabs ---------- */
 
 .tabs {
@@ -2041,9 +2011,6 @@ li:hover > .row-btn,
   }
   .page {
     padding: 20px 16px 140px;
-  }
-  .stats {
-    grid-template-columns: 1fr;
   }
   .summary {
     flex-direction: column;

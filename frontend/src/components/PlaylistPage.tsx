@@ -2,11 +2,11 @@ import { useState } from "react";
 import type { PlaylistDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { fmt, pct, plural, timeAgo, useResource } from "../hooks.ts";
+import { fmt, plural, timeAgo, useResource } from "../hooks.ts";
 import { IconCheckCircle, IconExternal, IconRefresh, IconTag, IconTrash } from "./icons.tsx";
 import { SortPanel } from "./SortPanel.tsx";
 import { TracksTable } from "./TracksTable.tsx";
-import { Button, ConfirmDialog, InfoTip, Notice, PageSkeleton, Progress, Stat } from "./ui.tsx";
+import { Button, ConfirmDialog, InfoTip, Notice, PageSkeleton } from "./ui.tsx";
 
 type Tab = "sort" | "tracks";
 
@@ -180,41 +180,6 @@ export function PlaylistPage({ playlistId }: { playlistId: string }) {
           . You can keep working; this page updates when it finishes.
         </Notice>
       )}
-
-      <section className="stats" aria-label="Tag coverage">
-        <Stat
-          label="Tagged"
-          value={`${pct(playlist.enriched, playlist.total)}%`}
-          sub={
-            <>
-              <Progress value={playlist.enriched} max={playlist.total} label="Tagged" />
-              <span className="stat-sub">
-                {fmt(playlist.enriched)} of {fmt(playlist.total)} tracks
-              </span>
-            </>
-          }
-        />
-        <Stat
-          label="Have a subgenre"
-          value={`${pct(playlist.withSubgenre, playlist.total)}%`}
-          sub={
-            <>
-              <Progress value={playlist.withSubgenre} max={playlist.total} label="Subgenre" />
-              <span className="stat-sub">{fmt(playlist.withSubgenre)} tracks</span>
-            </>
-          }
-        />
-        <Stat
-          label="Have a mood"
-          value={`${pct(playlist.withMood, playlist.total)}%`}
-          sub={
-            <>
-              <Progress value={playlist.withMood} max={playlist.total} label="Mood" />
-              <span className="stat-sub">{fmt(playlist.withMood)} tracks</span>
-            </>
-          }
-        />
-      </section>
 
       <div className="tabs" role="tablist">
         <button

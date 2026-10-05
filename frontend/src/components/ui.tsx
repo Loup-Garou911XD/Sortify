@@ -287,16 +287,6 @@ export function Notice({
   );
 }
 
-export function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
-  return (
-    <div className="stat">
-      <span className="eyebrow">{label}</span>
-      <div className="stat-value">{value}</div>
-      {sub}
-    </div>
-  );
-}
-
 /** A labelled form control: the label sits above the input as a small caps eyebrow. */
 export function Field({
   label,
