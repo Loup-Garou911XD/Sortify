@@ -11,10 +11,11 @@ sortify apply <run-id>                                          # create playlis
 sortify status [run-id]                                         # progress of runs
 sortify links <run-id>                                          # youtube.com links to play each group (no quota)
 sortify delete <run-id>                                         # delete a saved plan (YouTube playlists stay)
+sortify tags PL...                                              # tag coverage report (no API calls)
 sortify ui                                                      # start the web interface
 ```
 
-- `--by` is `subgenre`, `mood` or `type`. A track goes into **every** group it matches; `--max-groups N` caps that.
+- `--by` is `subgenre`, `mood`, `language` or `decade`. A track goes into **every** group it matches; `--max-groups N` caps that. Song type is tagged and shown, but not something to group by.
 - Groups smaller than `--min-size` are dropped. Tracks left without a group go to *Other*, tracks with no tags at all to *Unsorted* (`--no-leftovers` skips both).
 - `enrich --max-api-calls N` and `apply --max-writes N` limit a single run. Run the same command again to continue.
 - `enrich --skip itunes,spotify` leaves out some tag sources for one run, and `enrich --force` tags already tagged tracks again (cached lookups are reused).
