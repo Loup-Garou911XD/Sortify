@@ -218,11 +218,11 @@ export function RunPage({ runId }: { runId: number }) {
               <tr>
                 <th>Playlist</th>
                 <th className="num">Tracks</th>
-                <th className="col-progress">Added</th>
-                <th>On YouTube</th>
                 <th title="Temporary playlists: no quota or sign-in needed, 50 tracks per link">
                   Play without quota
                 </th>
+                <th className="col-progress">Added</th>
+                <th>On YouTube</th>
               </tr>
             </thead>
             <tbody>
@@ -230,6 +230,15 @@ export function RunPage({ runId }: { runId: number }) {
                 <tr key={g.groupId}>
                   <td style={{ fontWeight: 550 }}>{g.name}</td>
                   <td className="num">{fmt(g.total)}</td>
+                  <td>
+                    <PlayLinks
+                      runId={runId}
+                      groupId={g.groupId}
+                      name={g.name}
+                      links={g.watchLinks}
+                      inMusic={status?.opensInMusic ?? false}
+                    />
+                  </td>
                   <td className="col-progress">
                     <div className="inline-meter">
                       <Progress
@@ -255,15 +264,6 @@ export function RunPage({ runId }: { runId: number }) {
                     ) : (
                       <span className="faint">Not created yet</span>
                     )}
-                  </td>
-                  <td>
-                    <PlayLinks
-                      runId={runId}
-                      groupId={g.groupId}
-                      name={g.name}
-                      links={g.watchLinks}
-                      inMusic={status?.opensInMusic ?? false}
-                    />
                   </td>
                 </tr>
               ))}
@@ -409,7 +409,7 @@ function PlayLinks({
         >
           {links.map((link, i) => (
             <option key={link} value={i}>
-              Part {i + 1} of {parts}
+              {i + 1} / {parts}
             </option>
           ))}
         </select>
