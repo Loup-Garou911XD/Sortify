@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { DIMENSIONS, type Dimension, type TagSource } from "./api/types.ts";
+import { DIMENSIONS, type Dimension, GROUP_BY, type TagSource } from "./api/types.ts";
 import { isCachedMiss } from "./enrich/cache.ts";
 import {
   type MergeNotes,
@@ -13,7 +13,7 @@ import {
 
 export type { Dimension, TagSource };
 // Re-exported so callers that already reach for the store keep working.
-export { DIMENSIONS };
+export { DIMENSIONS, GROUP_BY };
 
 export interface Track {
   videoId: string;

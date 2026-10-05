@@ -5,7 +5,7 @@ import { createInterface } from "node:readline/promises";
 import { Command, InvalidArgumentError, Option } from "commander";
 import { applyRun, type Privacy } from "./apply.ts";
 import { type Config, loadConfig, VERSION } from "./config.ts";
-import { DIMENSIONS, type Dimension, Store } from "./db.ts";
+import { type Dimension, GROUP_BY, Store } from "./db.ts";
 import { enrichPlaylist } from "./enrich/pipeline.ts";
 import { PROVIDERS, providerStatuses } from "./enrich/providers.ts";
 import { tagReport } from "./enrich/report.ts";
@@ -51,7 +51,7 @@ async function confirm(question: string): Promise<boolean> {
 const program = new Command()
   .name("sortify")
   .description(
-    "Split large YouTube / YouTube Music playlists into sub-playlists by subgenre, mood, song type, language or decade.",
+    "Split large YouTube / YouTube Music playlists into sub-playlists by subgenre, mood, language or decade.",
   )
   .version(VERSION);
 
@@ -146,7 +146,7 @@ program
   )
   .argument("<playlist>", "playlist URL or ID")
   .addOption(
-    new Option("--by <dimension>", "what to group by").choices([...DIMENSIONS]).default("subgenre"),
+    new Option("--by <dimension>", "what to group by").choices([...GROUP_BY]).default("subgenre"),
   )
   .option("--min-size <n>", "drop groups with fewer tracks than this", positiveInt, 5)
   .option("--max-groups <n>", "put each track in at most this many groups", positiveInt)

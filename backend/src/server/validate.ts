@@ -4,7 +4,7 @@
  * routes in the page. Anything that decides whether a request is acceptable belongs here, so
  * the two shells cannot drift.
  */
-import { DIMENSIONS, type Dimension, type GroupDraft } from "../api/types.ts";
+import { type Dimension, GROUP_BY, type GroupDraft } from "../api/types.ts";
 
 export const MAX_GROUPS = 500;
 export const MAX_NAME = 100;
@@ -34,8 +34,8 @@ export function optionalPositiveInt(value: unknown, name: string): number | unde
 }
 
 export function dimensionOf(value: unknown): Dimension {
-  if (typeof value !== "string" || !(DIMENSIONS as readonly string[]).includes(value)) {
-    throw new RequestError(400, `dimension must be one of ${DIMENSIONS.join(", ")}`);
+  if (typeof value !== "string" || !(GROUP_BY as readonly string[]).includes(value)) {
+    throw new RequestError(400, `dimension must be one of ${GROUP_BY.join(", ")}`);
   }
   return value as Dimension;
 }

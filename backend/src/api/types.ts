@@ -5,8 +5,14 @@
  */
 
 export type Dimension = "subgenre" | "mood" | "type" | "language" | "decade";
-/** Every dimension, for validating input and listing choices. */
+/** Every dimension a tag can have. */
 export const DIMENSIONS: readonly Dimension[] = ["subgenre", "mood", "type", "language", "decade"];
+/**
+ * The dimensions a plan can group by, which is not every dimension: a song type ("Live",
+ * "Remix") describes one upload of a song rather than sorting a library, so it stays a tag you
+ * can see and search, not a shelf. Plans made when it was one still read back fine.
+ */
+export const GROUP_BY: readonly Dimension[] = ["subgenre", "mood", "language", "decade"];
 /** Where a tag came from: "rule" (title rules) or a provider id (see ProviderStatus). */
 export type TagSource = string;
 export type RunStatus = "planned" | "applying" | "paused" | "done";

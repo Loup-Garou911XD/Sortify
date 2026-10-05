@@ -1169,6 +1169,10 @@ li:hover > .row-btn,
   border: 0;
   min-width: 0;
   display: inline-flex;
+  /* Five options (the dimensions) do not fit one phone line: wrap onto a second row rather than
+     running off the side. The labels stay nowrap, so without this the whole page scrolls. */
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
   background: var(--panel-2);
   border-radius: 8px;
@@ -1519,6 +1523,7 @@ li:hover > .row-btn,
 /* Bulk include/exclude for the plan's cards, above the grid. */
 .groups-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
@@ -2037,6 +2042,11 @@ li:hover > .row-btn,
 }
 
 @media (max-width: 560px) {
+  /* Wrapped, the count and one button on a line reads as a mistake: give the count its own row
+     so the two buttons stay a pair. */
+  .groups-bar .muted {
+    flex: 1 0 100%;
+  }
   .trigger-word {
     display: none;
   }

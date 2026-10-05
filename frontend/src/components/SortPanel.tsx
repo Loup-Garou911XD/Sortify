@@ -34,10 +34,10 @@ const PREVIEW_ROWS = 4;
 /** How many more tracks one "Show more" reveals. */
 const MORE_ROWS = 10;
 
+/** What a plan can group by: the tag dimensions minus song type (see GROUP_BY in api/types.ts). */
 const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "subgenre", label: "Subgenre" },
   { value: "mood", label: "Mood" },
-  { value: "type", label: "Song type" },
   { value: "language", label: "Language" },
   { value: "decade", label: "Decade" },
 ];

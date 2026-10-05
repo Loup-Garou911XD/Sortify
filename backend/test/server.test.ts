@@ -245,6 +245,17 @@ describe("api", () => {
     expect(next.body.runId).toBeGreaterThan(runId);
   });
 
+  it("refuses to group by a dimension that only labels a track", async () => {
+    const { api } = await setup();
+    // Song type is still tagged and shown, but a plan cannot be built on it.
+    const res = await api<{ error: string }>("/api/playlists/PL1/preview", {
+      method: "POST",
+      body: { dimension: "type", minSize: 1, includeLeftovers: false },
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("dimension must be one of subgenre, mood, language, decade");
+  });
+
   it("rejects plans with unknown videos or duplicate names", async () => {
     const { api } = await setup();
     const bad = (groups: unknown) =>
