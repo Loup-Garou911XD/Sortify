@@ -1,22 +1,23 @@
 import type { FetchLike, LookupDeps } from "./lookup.ts";
 import { ServiceClient } from "./lookup.ts";
 import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
-import { bestMatch, similarity, yearOf } from "./text.ts";
+import { bestMatch, lacksYear, similarity, yearOf } from "./text.ts";
 
 const API = "https://api.spotify.com/v1";
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const MIN_SIMILARITY = 0.6;
-/** Genres describe the artist, not this track, but they are detailed ("desi hip hop"). */
-const GENRE_WEIGHT = 0.6;
 
 /** The cached form of a track search result. */
 export interface SpotifyMatch {
   /** Spotify track id. */
   id: string;
-  /** The matched artist, whose genres are looked up (and cached) separately. */
+  /** The matched artist. No longer read (see `Spotify`); kept so older entries still parse. */
   artistId: string;
-  /** Release year of the album the track was found on. Absent in older cache entries. */
-  year?: number;
+  /**
+   * Release year of the album the track was found on; `null` when Spotify gives none. Absent in
+   * entries cached before it was read; those are asked again (see `lacksYear`).
+   */
+  year?: number | null;
 }
 
 interface SearchResponse {
@@ -31,10 +32,11 @@ interface SearchResponse {
 }
 
 /**
- * Spotify Web API with app credentials (no user sign-in): finds the track, then its artist's
- * genres. Spotify marks artist genres as deprecated, so an empty list is treated as "no data".
- * Development-mode apps can no longer batch artist lookups, so each artist is fetched once and
- * cached.
+ * Spotify Web API with app credentials (no user sign-in): finds the track and reads the release
+ * year of its album, for the `decade` tag. It gives no genres. Spotify used to list them on the
+ * artist, but development-mode apps (every personal app) now get artist objects without
+ * `genres`, `popularity` or `followers`, so asking for the artist cost a request per artist and
+ * could never return anything.
  */
 export class Spotify implements ProviderClient {
   readonly id = "spotify";
@@ -100,19 +102,10 @@ export class Spotify implements ProviderClient {
         limit: "10",
       })}`,
       parse: (body) => pickTrack(body as SearchResponse, artist, title),
+      outdated: lacksYear,
     });
     if (!match) return { genres: [] };
-    const genres = await this.http.get({
-      kind: "artist",
-      key: [match.artistId],
-      url: `${API}/artists/${match.artistId}`,
-      parse: (body) => (body as { genres?: string[] } | null)?.genres ?? [],
-    });
-    return {
-      externalId: match.id,
-      genres: genres.map((tag) => ({ tag, source: this.id, weight: GENRE_WEIGHT })),
-      year: match.year,
-    };
+    return { externalId: match.id, genres: [], year: match.year ?? undefined };
   }
 }
 
@@ -130,14 +123,14 @@ export function pickTrack(
   return {
     id: best.item.id,
     artistId: best.artistId,
-    year: yearOf(best.item.album?.release_date),
+    year: yearOf(best.item.album?.release_date) ?? null,
   };
 }
 
 export const spotify: TagProvider = {
   id: "spotify",
   label: "Spotify",
-  help: "Detailed artist genres (e.g. desi hip hop, punjabi pop). Needs an app's client ID and secret from developer.spotify.com.",
+  help: "Release years, for sorting by decade. No genres: Spotify withholds them from personal apps. Needs an app's client ID and secret from developer.spotify.com.",
   envVars: ["SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"],
   create: (deps, env) =>
     new Spotify(deps, env.SPOTIFY_CLIENT_ID ?? "", env.SPOTIFY_CLIENT_SECRET ?? ""),

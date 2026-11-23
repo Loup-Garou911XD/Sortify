@@ -26,7 +26,7 @@ export const DEFAULT_TAG_MAP: TagMap = {
     Rock: ["rock music"],
     Metal: [],
     Electronic: ["electronica", "edm", "dance", "electronic dance music", "electronic music"],
-    "Hip Hop": ["hip-hop", "hiphop", "rap", "hip hop music", "hip-hop/rap"],
+    "Hip Hop": ["hip-hop", "hiphop", "rap", "hip hop music", "hip-hop/rap", "rap/hip hop"],
     "R&B and Soul": [
       "r&b",
       "rnb",
@@ -43,7 +43,8 @@ export const DEFAULT_TAG_MAP: TagMap = {
     Classical: ["classical music"],
     Latin: ["latin music", "music of latin america"],
     Reggae: [],
-    Soundtrack: ["stage & screen", "score", "film score", "ost", "original soundtrack"],
+    // "Film" is a YouTube topic label, mostly on film songs and soundtracks.
+    Soundtrack: ["stage & screen", "score", "film score", "ost", "original soundtrack", "film"],
     World: ["world music"],
     Indian: ["indian music", "music of india", "regional indian"],
     "Asian Music": ["music of asia"],
@@ -64,6 +65,8 @@ export const DEFAULT_TAG_MAP: TagMap = {
     "Power Pop": [],
     Europop: ["euro pop"],
     "Teen Pop": [],
+    "Pop Rock": [],
+    "Psychedelic Pop": [],
     // Rock
     "Alternative Rock": ["alternative", "alt rock", "alt-rock"],
     "Indie Rock": ["indie"],
@@ -85,6 +88,8 @@ export const DEFAULT_TAG_MAP: TagMap = {
     "Blues Rock": [],
     Britpop: [],
     "Surf Rock": ["surf"],
+    "Art Rock": [],
+    "New Wave": [],
     // Metal
     "Heavy Metal": [],
     "Thrash Metal": ["thrash"],
@@ -137,6 +142,8 @@ export const DEFAULT_TAG_MAP: TagMap = {
     "Cloud Rap": [],
     "Emo Rap": [],
     "Pop Rap": [],
+    "Hardcore Hip Hop": ["hardcore rap"],
+    "Hip House": [],
     "Alternative Hip Hop": ["alternative rap"],
     "Jazz Rap": ["jazz hop", "jazzy hip hop"],
     Grime: [],

@@ -1,6 +1,6 @@
 import { type LookupDeps, ServiceClient } from "./lookup.ts";
 import type { ProviderClient, TagProvider, TrackQuery, TrackTags } from "./provider.ts";
-import { similarity } from "./text.ts";
+import { lacksYear, similarity, yearOf } from "./text.ts";
 
 /** The cached form of a search result (kept stable so existing caches stay valid). */
 export interface DiscogsMatch {
@@ -8,6 +8,11 @@ export interface DiscogsMatch {
   id: string;
   genres: string[];
   styles: string[];
+  /**
+   * Release year of the master or release, `null` when Discogs gives none. Absent in entries
+   * cached before it was read; those are asked again (see `lacksYear`).
+   */
+  year?: number | null;
 }
 
 interface SearchResponse {
@@ -18,6 +23,8 @@ interface SearchResponse {
     genre?: string[];
     style?: string[];
     format?: string[];
+    /** e.g. "2003"; a master's is the original release year. */
+    year?: string;
   }[];
 }
 
@@ -54,6 +61,7 @@ export class Discogs implements ProviderClient {
       key: [artist, title],
       url,
       parse: (body) => pickResult(body as SearchResponse, artist),
+      outdated: lacksYear,
     });
     if (!match) return { genres: [] };
     return {
@@ -63,6 +71,7 @@ export class Discogs implements ProviderClient {
         source: this.id,
         weight: 1,
       })),
+      year: match.year ?? undefined,
     };
   }
 }
@@ -70,7 +79,7 @@ export class Discogs implements ProviderClient {
 export const discogs: TagProvider = {
   id: "discogs",
   label: "Discogs",
-  help: "The main subgenre source (release styles such as Synthwave or Deep House).",
+  help: "The main subgenre source (release styles such as Synthwave or Deep House), and release years.",
   envVars: ["DISCOGS_TOKEN"],
   create: (deps, env) => new Discogs(deps, env.DISCOGS_TOKEN ?? ""),
 };
@@ -87,7 +96,12 @@ export function pickResult(body: SearchResponse | null, artist: string): Discogs
     const resultArtist = r.title.slice(0, sep).replace(/\s*\(\d+\)$/, "");
     if (similarity(resultArtist, artist) < MIN_SIMILARITY) continue;
     if (!r.style?.length && !r.genre?.length) continue;
-    return { id: `${r.type}/${r.id}`, genres: r.genre ?? [], styles: r.style ?? [] };
+    return {
+      id: `${r.type}/${r.id}`,
+      genres: r.genre ?? [],
+      styles: r.style ?? [],
+      year: yearOf(r.year) ?? null,
+    };
   }
   return null;
 }

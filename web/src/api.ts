@@ -14,6 +14,7 @@ import type {
   PlaylistDetail,
   PreviewRequest,
   PreviewResponse,
+  SourceTestResponse,
   StatusResponse,
   SyncView,
   TrackView,
@@ -22,6 +23,7 @@ import { applyRun, type Privacy } from "../../backend/src/apply.ts";
 import type { Cache } from "../../backend/src/db.ts";
 import { Budget, type LookupDeps } from "../../backend/src/enrich/lookup.ts";
 import { type Enrichers, enrichPlaylist } from "../../backend/src/enrich/pipeline.ts";
+import { testSources } from "../../backend/src/enrich/probe.ts";
 import {
   createProviderClients,
   providerStatuses,
@@ -152,6 +154,13 @@ const routes: [string, RegExp, Handler][] = [
       dailyQuota: DAILY_QUOTA,
       sync: sync ? syncView(sync.status()) : null,
       opensInMusic: musicLinks !== undefined,
+    }),
+  ],
+  [
+    "POST",
+    /^\/api\/sources\/test$/,
+    async (): Promise<SourceTestResponse> => ({
+      results: await testSources(ready(), getKeys(), `Sortify/${VERSION}`, SERVER_ONLY),
     }),
   ],
   [

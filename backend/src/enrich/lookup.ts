@@ -112,6 +112,14 @@ export interface LookupRequest<T> {
   key: string[];
   url: string;
   parse: (body: unknown, status: number) => T;
+  /**
+   * A cached answer saved before `parse` read some field it reads now (a release year, say).
+   * Matches never expire, so without this an old entry would lack the field for good: one that
+   * reads as outdated is asked again and overwritten. `parse` must then store the field even when
+   * the service has no value for it (`null`, not absent), or the entry would be asked every run.
+   * Offline replays still answer with the outdated entry.
+   */
+  outdated?: (cached: T) => boolean;
 }
 
 /**
@@ -141,8 +149,10 @@ export class ServiceClient {
   get<T>(request: LookupRequest<T>): Promise<T> {
     const source = request.kind ? `${this.options.source}-${request.kind}` : this.options.source;
     const key = lookupKey(...request.key);
-    const cached = this.deps.store.cacheGet(source, key, MISS_TTL_MS);
-    if (cached !== undefined) return Promise.resolve(cached as T);
+    const cached = this.deps.store.cacheGet(source, key, MISS_TTL_MS) as T | undefined;
+    if (cached !== undefined && (this.deps.offline || !request.outdated?.(cached))) {
+      return Promise.resolve(cached);
+    }
     // Nothing cached and no request allowed: the empty body every parse already handles.
     if (this.deps.offline) return Promise.resolve(request.parse(null, 0));
 

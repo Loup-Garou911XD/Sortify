@@ -14,6 +14,7 @@ import { MusicBrainz } from "../src/enrich/musicbrainz.ts";
 import { type Enrichers, enrichPlaylist } from "../src/enrich/pipeline.ts";
 import type { ProviderClient } from "../src/enrich/provider.ts";
 import { createProviderClients, providerStatuses } from "../src/enrich/providers.ts";
+import { lacksYear } from "../src/enrich/text.ts";
 import { TagMapper } from "../src/tagging/mapper.ts";
 
 const json = (body: unknown, status = 200): Response =>
@@ -295,6 +296,67 @@ describe("lookup plumbing", () => {
     expect(await Promise.all([lookup(), lookup(), lookup()])).toEqual([42, 42, 42]);
     expect(requests).toBe(1);
     expect(deps.budget.used).toBe(1);
+  });
+
+  it("asks again once about a cached match its provider calls outdated", async () => {
+    const store = new Store(":memory:");
+    let requests = 0;
+    const deps: LookupDeps = {
+      store,
+      budget: new Budget(),
+      userAgent: "test",
+      fetch: async () => {
+        requests++;
+        return json({ value: 42, year: null });
+      },
+      sleep: async () => {},
+    };
+    // Saved before the provider read `year`, so the key is missing altogether.
+    store.cachePut("test", "k", { value: 41 });
+    const http = new ServiceClient(deps, { name: "Test", source: "test", intervalMs: 0 });
+    const lookup = () =>
+      http.get({
+        key: ["k"],
+        url: "https://example.test/k",
+        parse: (body) => body as { value: number; year?: number | null },
+        outdated: lacksYear,
+      });
+    expect(await lookup()).toEqual({ value: 42, year: null });
+    // The refreshed entry stores `year: null`, so it is not asked a third time.
+    expect(await lookup()).toEqual({ value: 42, year: null });
+    expect(requests).toBe(1);
+
+    store.cachePut("test", "k", { value: 41 });
+    const offline = new ServiceClient(
+      { ...deps, offline: true },
+      { name: "Test", source: "test", intervalMs: 0 },
+    );
+    expect(
+      await offline.get({
+        key: ["k"],
+        url: "https://example.test/k",
+        parse: () => null,
+        outdated: lacksYear,
+      }),
+    ).toEqual({ value: 41 });
+    expect(requests).toBe(1);
+  });
+
+  it("reads the release year off a Discogs result, null when it has none", () => {
+    const withYear = pickResult(
+      {
+        results: [
+          { id: 3, type: "master", title: "Daft Punk - Discovery", style: ["House"], year: "2001" },
+        ],
+      },
+      "Daft Punk",
+    );
+    expect(withYear?.year).toBe(2001);
+    const without = pickResult(
+      { results: [{ id: 4, type: "release", title: "Daft Punk - Single", style: ["House"] }] },
+      "Daft Punk",
+    );
+    expect(without?.year).toBeNull();
   });
 
   it("prefers a Discogs master over a release of the same artist", () => {

@@ -1,5 +1,9 @@
 import { useState } from "react";
-import type { SyncView } from "../../../backend/src/api/types.ts";
+import type {
+  SourceTestResponse,
+  SourceTestResult,
+  SyncView,
+} from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
 import type { Theme } from "../hooks.ts";
@@ -10,6 +14,7 @@ import {
   IconMenu,
   IconMonitor,
   IconMoon,
+  IconPlay,
   IconPlug,
   IconRefresh,
   IconSignIn,
@@ -24,8 +29,9 @@ const REPO_URL = "https://github.com/Loup-Garou911XD/Sortify";
 /**
  * How a connection reads at a glance: working, not set up, busy, or broken. The dot and the
  * spinning ring in the top bar are the same four, so the trigger and the panel never disagree.
+ * `warn` is the fifth, used only on a tag source a test found answering with nothing usable.
  */
-type Tone = "on" | "off" | "sync" | "bad";
+type Tone = "on" | "off" | "sync" | "bad" | "warn";
 
 /**
  * One row of the Connections panel. It is a plain block normally, and a button when the shell
@@ -37,6 +43,7 @@ function SourceRow({
   state,
   help,
   keys = [],
+  note,
   onClick,
 }: {
   tone: Tone;
@@ -44,6 +51,8 @@ function SourceRow({
   state?: string;
   help: string;
   keys?: string[];
+  /** A line under the help, e.g. what a connection test found. */
+  note?: { text: string; tone: "on" | "warn" | "bad" } | undefined;
   onClick?: (() => void) | undefined;
 }) {
   const body = (
@@ -55,6 +64,11 @@ function SourceRow({
           {state && <span className="source-state">{state}</span>}
         </div>
         <p className="source-help">{help}</p>
+        {note && (
+          <p className={`source-note ${note.tone}`} role="status">
+            {note.text}
+          </p>
+        )}
         {keys.length > 0 && (
           <div className="source-keys">
             {keys.map((v) => (
@@ -66,7 +80,7 @@ function SourceRow({
     </>
   );
   return (
-    <li className={tone === "on" ? "source-row-item on" : "source-row-item"}>
+    <li className={`source-row-item ${tone}`}>
       {onClick ? (
         <button type="button" className="source-row source-row-button" onClick={onClick}>
           {body}
@@ -130,6 +144,18 @@ function syncHelp(sync: SyncView): string {
     : "Playlists, tags and plans are kept in step across your devices.";
 }
 
+const TEST_TONE = {
+  works: "on",
+  limited: "warn",
+  failed: "bad",
+} as const satisfies Record<SourceTestResult["status"], Tone>;
+
+const TEST_LABEL = {
+  works: "Works",
+  limited: "Limited",
+  failed: "Failed",
+} as const satisfies Record<SourceTestResult["status"], string>;
+
 /** Each theme names the one the toggle moves to, so a single button reaches all three. */
 const THEMES: Record<Theme, { label: string; Glyph: typeof IconSun; next: Theme }> = {
   light: { label: "Light", Glyph: IconSun, next: "dark" },
@@ -157,6 +183,9 @@ export function TopBar({
     configureSource,
   } = useApp();
   const [signingOut, setSigningOut] = useState(false);
+  /** The last connection test, per provider id; undefined until one has run. */
+  const [tests, setTests] = useState<Record<string, SourceTestResult>>();
+  const [testing, setTesting] = useState(false);
 
   const sources = status?.sources ?? [];
   const ready = sources.filter((s) => s.configured).length;
@@ -179,6 +208,45 @@ export function TopBar({
     } finally {
       setSigningOut(false);
     }
+  };
+
+  const testSources = async () => {
+    setTesting(true);
+    try {
+      const { results } = await api<SourceTestResponse>("/api/sources/test", { method: "POST" });
+      setTests(Object.fromEntries(results.map((r) => [r.id, r])));
+      const bad = results.filter((r) => r.status !== "works").length;
+      notify(
+        bad ? "error" : "good",
+        bad
+          ? `${bad} of ${results.length} tag sources failed or gave nothing usable.`
+          : `All ${results.length} ready tag sources work.`,
+      );
+    } catch (err) {
+      notify("error", (err as Error).message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  /** A tested source reads by its result; an untested one by its configuration alone. */
+  const sourceTone = (id: string, configured: boolean): Tone => {
+    if (!configured) return "off";
+    if (testing) return "sync";
+    return TEST_TONE[tests?.[id]?.status ?? "works"];
+  };
+  const sourceState = (id: string, configured: boolean): string => {
+    if (!configured) return "Off";
+    if (testing) return "Testing";
+    const status = tests?.[id]?.status;
+    return status ? TEST_LABEL[status] : "Ready";
+  };
+
+  const sourceNote = (id: string, configured: boolean) => {
+    const result = configured && !testing ? tests?.[id] : undefined;
+    if (!result) return undefined;
+    const time = result.ms > 0 ? ` (${result.ms} ms)` : "";
+    return { text: `${result.message}${time}`, tone: TEST_TONE[result.status] };
   };
 
   const manualSync = async () => {
@@ -336,10 +404,11 @@ export function TopBar({
                   {sources.map((s) => (
                     <SourceRow
                       key={s.id}
-                      tone={s.configured ? "on" : "off"}
+                      tone={sourceTone(s.id, s.configured)}
                       name={s.label}
-                      state={s.configured ? "Ready" : "Off"}
+                      state={sourceState(s.id, s.configured)}
                       help={s.help}
+                      note={sourceNote(s.id, s.configured)}
                       keys={!configureSource && !s.configured ? s.envVars : []}
                       onClick={
                         configureSource &&
@@ -351,6 +420,13 @@ export function TopBar({
                     />
                   ))}
                 </ul>
+                {ready > 0 && (
+                  // Stays open: the results land on the rows above.
+                  <MenuItem disabled={testing} onClick={() => void testSources()}>
+                    {testing ? <span className="spinner" aria-hidden /> : <IconPlay size={15} />}
+                    {testing ? "Testing ready sources\u2026" : "Test ready sources"}
+                  </MenuItem>
+                )}
                 {ready < sources.length && !configureSource && (
                   <p className="menu-foot">
                     Set the keys above, then restart <code>sortify ui</code>.

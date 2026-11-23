@@ -72,3 +72,12 @@ export function yearOf(date: string | undefined): number | undefined {
   const year = Number(date?.slice(0, 4));
   return Number.isInteger(year) && year > 0 ? year : undefined;
 }
+
+/**
+ * A cached match saved before its provider read release years. Such entries have no `year` key
+ * at all, while newer ones store `null` when the service gave none. Pass it as a lookup's
+ * `outdated` so the old entries are asked again once.
+ */
+export function lacksYear(match: { year?: number | null } | null): boolean {
+  return match !== null && match.year === undefined;
+}

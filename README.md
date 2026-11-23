@@ -81,7 +81,7 @@ happens.
 | MusicBrainz | none | Corrects artist and title spelling, and adds curated genres for tracks nothing else placed |
 | Discogs | `DISCOGS_TOKEN` (Discogs → Settings → Developers → *Generate new token*) | Detailed subgenres from release styles (main source) |
 | Last.fm | `LASTFM_API_KEY` ([last.fm/api/account/create](https://www.last.fm/api/account/create)) | Moods, and subgenres where Discogs has none |
-| Spotify | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` (an app at [developer.spotify.com](https://developer.spotify.com/dashboard)) | Detailed artist genres such as desi hip hop or punjabi pop, and release years |
+| Spotify | `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` (an app at [developer.spotify.com](https://developer.spotify.com/dashboard)) | Release years, for sorting by decade. No genres: Spotify withholds them from personal (development-mode) apps |
 | iTunes | none (`ITUNES_COUNTRY` picks the store, default `US`) | Store genres such as Bollywood or Punjabi Pop, and release years. Asked only when the others found no subgenre, since Apple allows about 20 requests a minute |
 | Deezer | none | Album genres and release years, also only when nothing else found a subgenre. Not available in the browser build, which cannot read its answers |
 | YouTube topics | none | Broad genres from YouTube's own topic labels, collected free when a playlist is fetched |

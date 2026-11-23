@@ -9,6 +9,7 @@ import type {
   PreviewRequest,
   PreviewResponse,
   Privacy,
+  SourceTestResponse,
   StatusResponse,
   SyncView,
   TrackView,
@@ -17,6 +18,7 @@ import { applyRun, type PlaylistWriter } from "../apply.ts";
 import { type Config, VERSION } from "../config.ts";
 import type { Store } from "../db.ts";
 import { enrichPlaylist } from "../enrich/pipeline.ts";
+import { testSources } from "../enrich/probe.ts";
 import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
 import { createEnrichers, fetchPlaylist, type PlaylistReader } from "../services.ts";
@@ -179,6 +181,13 @@ export function createApp(deps: AppDeps) {
           opensInMusic: musicLinks !== undefined,
         };
       },
+    ],
+    [
+      "POST",
+      /^\/api\/sources\/test$/,
+      async (): Promise<SourceTestResponse> => ({
+        results: await testSources(store, config.env, config.userAgent),
+      }),
     ],
     [
       "POST",

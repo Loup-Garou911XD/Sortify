@@ -87,7 +87,11 @@ describe("iTunes", () => {
 
   it("picks the song whose artist and title match", () => {
     // The exact title beats the remix that is listed first.
-    expect(pickSong(results, "Karan Aujla", "Softly")).toEqual({ id: "2", genre: "Punjabi Pop" });
+    expect(pickSong(results, "Karan Aujla", "Softly")).toEqual({
+      id: "2",
+      genre: "Punjabi Pop",
+      year: null,
+    });
     expect(pickSong(results, "Someone Else", "Softly")).toBeNull();
   });
 
@@ -138,17 +142,18 @@ describe("Spotify", () => {
                   { id: "ar1", name: "Karan Aujla" },
                   { id: "ar2", name: "IKKY" },
                 ],
+                album: { release_date: "2023-04-21" },
               },
             ],
           },
         });
       }
-      return json({ genres: ["punjabi hip hop", "desi pop", "something unknown"] });
+      return json({}, 404);
     };
     return { fetch, calls };
   }
 
-  it("gets a token once, finds the track and maps the artist's genres", async () => {
+  it("gets a token once, finds the track and takes its year, asking for no artist", async () => {
     const store = new Store(":memory:");
     playlist(store, [
       ["a", "Karan Aujla - Softly", "Karan Aujla"],
@@ -158,13 +163,18 @@ describe("Spotify", () => {
     const client = new Spotify(deps(fetch, store), "id", "secret");
     await enrichPlaylist(store, "PL", { mapper: new TagMapper(), clients: [client] });
 
-    expect(subgenres(store, "a")).toEqual(["Desi Hip Hop (spotify)", "Indian Pop (spotify)"]);
+    // Development-mode apps get artist objects without genres, so none are asked for.
+    expect(subgenres(store, "a")).toEqual([]);
+    const decades = store
+      .playlistTags("PL", "decade")
+      .filter((t) => t.videoId === "a")
+      .map((t) => `${t.value} (${t.source})`);
+    expect(decades).toEqual(["2020s (spotify)"]);
     expect(store.playlistTracks("PL")[0]?.externalIds).toEqual({ spotify: "t1" });
-    // One token (Basic auth), then Bearer calls; the second track is served from the cache.
+    // One token (Basic auth), then one Bearer search; the second track is served from the cache.
     expect(calls).toEqual([
       `token POST Basic ${Buffer.from("id:secret").toString("base64")}`,
       "/v1/search Bearer tok",
-      "/v1/artists/ar1 Bearer tok",
     ]);
   });
 

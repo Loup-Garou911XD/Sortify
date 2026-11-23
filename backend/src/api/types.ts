@@ -60,6 +60,22 @@ export interface ProviderStatus {
   configured: boolean;
 }
 
+/** One provider's answer to `POST /api/sources/test`: a live lookup that skips the cache. */
+export interface SourceTestResult {
+  id: string;
+  /**
+   * `works`: found the test song and gave genres, moods or a year. `limited`: answered, but with
+   * nothing usable. `failed`: a rejected key, an outage, a timeout. See `probeProviders`.
+   */
+  status: "works" | "limited" | "failed";
+  message: string;
+  ms: number;
+}
+
+export interface SourceTestResponse {
+  results: SourceTestResult[];
+}
+
 export interface PlaylistSummary {
   playlistId: string;
   title: string;
