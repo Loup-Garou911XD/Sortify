@@ -10,6 +10,8 @@
  * ids, which are local counters on both sides and so collide; see `mergeRuns`.
  */
 import type { Dimension, RunStatus, Tag } from "../db.ts";
+import { type KeySnapshot, mergeKeys, syncableEntries } from "./keys.ts";
+import { newestBy } from "./newest.ts";
 
 export const SNAPSHOT_VERSION = 1;
 
@@ -120,6 +122,11 @@ export interface Snapshot {
   deleted: Tombstone[];
   /** Plans deleted on some device, for the same reason. */
   deletedRuns: RunTombstone[];
+  /**
+   * Tag-source API keys, for devices that opted in to using them (see `sync/keys.ts`). Carried
+   * by every device either way, so one that has not opted in cannot drop another's keys.
+   */
+  keys: KeySnapshot[];
   /** Highest ids handed out so far, so neither side reuses one after a merge. */
   seq: { run: number; group: number };
 }
@@ -130,7 +137,15 @@ export interface MergeNotes {
   renumbered: { from: number; to: number; name: string }[];
   /** Runs that could not be taken because both copies are mid-apply under the same id. */
   conflicted: number[];
-  added: { playlists: number; tracks: number; tags: number; cache: number; runs: number };
+  added: {
+    playlists: number;
+    tracks: number;
+    tags: number;
+    cache: number;
+    runs: number;
+    /** Keys set or removed by the remote that differ from what was here. */
+    keys: number;
+  };
   /** What a deletion from another device took away here. */
   removed: { playlists: number; tracks: number; runs: number };
 }
@@ -145,6 +160,7 @@ export const emptySnapshot = (): Snapshot => ({
   runs: [],
   deleted: [],
   deletedRuns: [],
+  keys: [],
   seq: { run: 0, group: 0 },
 });
 
@@ -279,16 +295,12 @@ export function mergeSnapshots(
   const notes: MergeNotes = {
     renumbered: [],
     conflicted: [],
-    added: { playlists: 0, tracks: 0, tags: 0, cache: 0, runs: 0 },
+    added: { playlists: 0, tracks: 0, tags: 0, cache: 0, runs: 0, keys: 0 },
     removed: { playlists: 0, tracks: 0, runs: 0 },
   };
 
   // Deletions first: the newest one per playlist wins, and they decide what survives below.
-  const tombstones = new Map<string, Tombstone>();
-  for (const t of [...local.deleted, ...remote.deleted]) {
-    const seen = tombstones.get(t.playlistId);
-    if (!seen || t.at > seen.at) tombstones.set(t.playlistId, t);
-  }
+  const tombstones = newestBy([...local.deleted, ...remote.deleted], (t) => t.playlistId);
 
   // Playlists: the member list travels with the fetch that produced it.
   const playlists = new Map(local.playlists.map((p) => [p.playlistId, p]));
@@ -349,11 +361,7 @@ export function mergeSnapshots(
   // Deleted plans, by identity rather than id. Filtered out before the merge rather than after,
   // so a buried run is never renumbered, never counted as brought in, and never pushed back to
   // the device that still holds it.
-  const runGraves = new Map<string, RunTombstone>();
-  for (const t of [...local.deletedRuns, ...remote.deletedRuns]) {
-    const seen = runGraves.get(graveKey(t));
-    if (!seen || t.at > seen.at) runGraves.set(graveKey(t), t);
-  }
+  const runGraves = newestBy([...local.deletedRuns, ...remote.deletedRuns], graveKey);
   const alive = (run: RunSnapshot): boolean => !runGraves.has(identity(run));
   notes.removed.runs = local.runs.filter((r) => !alive(r)).length;
   const runs = mergeRuns(local.runs.filter(alive), remote.runs.filter(alive), seq, notes);
@@ -388,6 +396,10 @@ export function mergeSnapshots(
 
   const cutoff = new Date(Date.now() - TOMBSTONE_DAYS * 86_400_000).toISOString();
 
+  const keys = mergeKeys(local.keys, remote.keys, cutoff);
+  const before = new Map(local.keys.map((k) => [k.name, k.value]));
+  notes.added.keys = keys.filter((k) => (before.get(k.name) ?? null) !== k.value).length;
+
   return {
     merged: {
       version: SNAPSHOT_VERSION,
@@ -402,6 +414,7 @@ export function mergeSnapshots(
       deletedRuns: [...runGraves.values()].filter(
         (t) => t.at > cutoff && !buried.has(t.sourcePlaylistId),
       ),
+      keys,
       seq,
     },
     notes,
@@ -436,6 +449,8 @@ export function normalizeSnapshot(raw: Partial<Snapshot> | null | undefined): Sn
     runs: Array.isArray(raw.runs) ? raw.runs.map((r) => ({ ...r, groups: r.groups ?? [] })) : [],
     deleted: Array.isArray(raw.deleted) ? raw.deleted : [],
     deletedRuns: Array.isArray(raw.deletedRuns) ? raw.deletedRuns : [],
+    // Filtered, not just defaulted: only tag-source keys may ever enter a store this way.
+    keys: syncableEntries(raw.keys),
     seq: {
       run: Number(raw.seq?.run) || 0,
       group: Number(raw.seq?.group) || 0,

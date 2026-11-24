@@ -85,5 +85,6 @@ export const itunes: TagProvider = {
   label: "iTunes",
   help: "Store genres such as Punjabi Pop and Bollywood; asked only when others found no subgenre. Needs no key (ITUNES_COUNTRY picks the store, default US).",
   envVars: [],
+  settings: ["ITUNES_COUNTRY"],
   create: (deps, env) => new ITunes(deps, env.ITUNES_COUNTRY?.trim() || "US"),
 };

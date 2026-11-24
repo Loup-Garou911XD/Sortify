@@ -13,6 +13,7 @@ import { percent, plural, table } from "./format.ts";
 import { estimateQuota, planGroups } from "./planner.ts";
 import { startServer } from "./server/index.ts";
 import { createEnrichers, fetchPlaylist, youtubeFor } from "./services.ts";
+import { providerEnv } from "./sync/keys.ts";
 import { authorize } from "./youtube/auth.ts";
 import { parsePlaylistId } from "./youtube/playlistUrl.ts";
 import { WATCH_LINK_SIZE, watchLinks } from "./youtube/watchLinks.ts";
@@ -105,7 +106,8 @@ program
           maxApiCalls: opts.maxApiCalls,
           skip: opts.skip,
         });
-        for (const p of providerStatuses(config.env).filter((s) => !s.configured)) {
+        const env = providerEnv(config.env, store).env;
+        for (const p of providerStatuses(env).filter((s) => !s.configured)) {
           out(`${p.envVars.join(", ")} not set: skipping ${p.label}. ${p.help}`);
         }
 

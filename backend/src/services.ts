@@ -3,6 +3,7 @@ import type { Store } from "./db.ts";
 import { Budget, type LookupDeps } from "./enrich/lookup.ts";
 import type { Enrichers } from "./enrich/pipeline.ts";
 import { createProviderClients } from "./enrich/providers.ts";
+import { providerEnv } from "./sync/keys.ts";
 import { TagMapper } from "./tagging/mapper.ts";
 import { loadTagMap } from "./tagging/tagMapFile.ts";
 import { loadAuthClient } from "./youtube/auth.ts";
@@ -69,7 +70,8 @@ export function createEnrichers(
     budget,
     enrichers: {
       mapper: new TagMapper(loadTagMap(config.tagMapPath)),
-      clients: createProviderClients(deps, config.env, options.skip),
+      // Keys synced through Drive fill in for missing local ones, if this device opted in.
+      clients: createProviderClients(deps, providerEnv(config.env, store).env, options.skip),
     },
   };
 }

@@ -124,6 +124,16 @@ The local app syncs on start, every five minutes, after each job and on shutdown
 build on load, after writes and when you leave the page. One-off CLI commands need no syncing of
 their own, since their work travels on the server's next cycle.
 
+**API keys can travel too, if you want them to.** Under Connections → Key sync, each device can
+opt in to using the tag-source keys (Discogs, Last.fm, Spotify, the iTunes store) kept in that same
+file. It is off by default, and it is a per-device choice. Keys a device holds itself (`.env`, or
+the browser's own settings) always come first; synced keys only fill the gaps. In the local app,
+"Upload keys from .env to Drive" shares yours; in the browser, turning it on moves your keys
+there. Your Google sign-in and Google client never go to Drive. The file sits in a hidden folder
+only your own OAuth client can read, and reading it already takes a Google sign-in that can do
+far more than these keys, which only read public music metadata. "Remove keys from Drive" removes
+them from every device.
+
 If you signed in before the Drive scope existed, Google's old consent does not cover it: run
 `sortify auth` again, and press Connect YouTube again in the browser.
 

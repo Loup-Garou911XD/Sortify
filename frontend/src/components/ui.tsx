@@ -136,6 +136,96 @@ export function TagChips({ tags, dimension }: { tags: TrackTagView[]; dimension:
   );
 }
 
+/** A status dot's tone, shared by the Connections panel and the dialog headers. */
+export type Tone = "on" | "off" | "sync" | "bad" | "warn";
+
+/**
+ * Every popup's frame: a title with an optional status pill on the right, a body, and a footer
+ * of actions. It opens as a modal on mount; Escape, the footer's buttons and `close` all close
+ * it, and `onClose` runs once it has closed, so the caller can unmount it.
+ *
+ * `actions` takes `close`, for a footer of its own; without it the footer is a single Done
+ * button. A body that finishes the task can just call `onClose`: unmounting closes the modal.
+ */
+export function Dialog({
+  title,
+  status,
+  className = "",
+  onClose,
+  actions,
+  children,
+}: {
+  title: string;
+  status?: { tone: Tone; text: string } | undefined;
+  className?: string;
+  onClose: () => void;
+  actions?: (close: () => void) => ReactNode;
+  children: ReactNode;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const close = () => dialog.current?.close();
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className={`dialog ${className}`.trim()}
+      onClose={onClose}
+      aria-labelledby={titleId}
+    >
+      <div className="dialog-head">
+        <h2 id={titleId}>{title}</h2>
+        {status && (
+          <span className="dialog-status">
+            <span className={`dot dot-${status.tone}`} aria-hidden />
+            {status.text}
+          </span>
+        )}
+      </div>
+      <div className="dialog-body">{children}</div>
+      <div className="dialog-actions">
+        {actions ? (
+          actions(close)
+        ) : (
+          <Button variant="primary" onClick={close}>
+            Done
+          </Button>
+        )}
+      </div>
+    </dialog>
+  );
+}
+
+/**
+ * One setting or fact in a dialog: its label and help on the left, its control on the right.
+ * `stacked` puts the control under the label instead, for one that needs the full width.
+ */
+export function DialogRow({
+  label,
+  help,
+  stacked = false,
+  children,
+}: {
+  label: string;
+  help?: ReactNode;
+  stacked?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={stacked ? "dialog-row stacked" : "dialog-row"}>
+      <div className="dialog-row-text">
+        <div className="dialog-row-label">{label}</div>
+        {help && <div className="dialog-row-help">{help}</div>}
+      </div>
+      {children !== undefined && <div className="dialog-row-control">{children}</div>}
+    </div>
+  );
+}
+
 /**
  * A modal yes or no. A native <dialog> brings the backdrop, the focus trap and Escape with it,
  * and Escape lands on `onCancel` just like the Cancel button does. Cancel is also the first
@@ -158,28 +248,23 @@ export function ConfirmDialog({
   onCancel: () => void;
   children: ReactNode;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
-
   return (
-    <dialog ref={dialog} className="dialog" onClose={onCancel} aria-labelledby={titleId}>
-      <div className="dialog-head">
-        <h2 id={titleId}>{title}</h2>
-      </div>
-      <div className="dialog-body">{children}</div>
-      <div className="dialog-actions">
-        <Button variant="ghost" disabled={busy} onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button variant={variant} busy={busy} onClick={onConfirm}>
-          {confirmLabel}
-        </Button>
-      </div>
-    </dialog>
+    <Dialog
+      title={title}
+      onClose={onCancel}
+      actions={(close) => (
+        <>
+          <Button variant="ghost" disabled={busy} onClick={close}>
+            Cancel
+          </Button>
+          <Button variant={variant} busy={busy} onClick={onConfirm}>
+            {confirmLabel}
+          </Button>
+        </>
+      )}
+    >
+      {children}
+    </Dialog>
   );
 }
 

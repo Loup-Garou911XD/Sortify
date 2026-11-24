@@ -157,6 +157,19 @@ export function duration(seconds: number | null): string {
   return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+/** A byte count for people: "812 B", "4.2 KB", "1.3 MB". */
+export function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
 export function timeAgo(iso: string): string {
   const diff = (Date.now() - Date.parse(iso)) / 1000;
   if (diff < 60) return "just now";

@@ -5,6 +5,8 @@ import type {
   ApplyRequest,
   CreateRunRequest,
   EnrichRequest,
+  KeySyncView,
+  LibraryResponse,
   PlaylistDetail,
   PreviewRequest,
   PreviewResponse,
@@ -23,6 +25,7 @@ import { providerStatuses } from "../enrich/providers.ts";
 import { planGroups } from "../planner.ts";
 import { createEnrichers, fetchPlaylist, type PlaylistReader } from "../services.ts";
 import type { SyncEngine } from "../sync/engine.ts";
+import { providerEnv, withKeySources } from "../sync/keys.ts";
 import { syncView } from "../sync/view.ts";
 import {
   authState,
@@ -35,6 +38,15 @@ import {
 import { parsePlaylistId } from "../youtube/playlistUrl.ts";
 import { musicLink } from "../youtube/watchLinks.ts";
 import { JobBusyError, JobRunner } from "./jobs.ts";
+import {
+  type DeviceKeys,
+  forgetKeys,
+  keySyncView,
+  requireSync,
+  setKeySync,
+  shareKeys,
+} from "./keys.ts";
+import { libraryPlaylists } from "./library.ts";
 import { groupMusicLink, runDetail, runSummary, requireRun as sharedRequireRun } from "./runs.ts";
 import {
   asObject,
@@ -140,6 +152,16 @@ export function createApp(deps: AppDeps) {
   // This shell can read YouTube's redirect; the static build passes undefined (see `musicLink`).
   const musicLinks: typeof musicLink | undefined = musicLink;
 
+  // `.env` and the environment are read-only from here, so they are never moved (see keys.ts).
+  const envKeys: DeviceKeys = { read: () => config.env };
+  /** Key changes travel in the sync file, so they need sync on, and push soon after. */
+  const keyRoute = (change: () => KeySyncView): KeySyncView => {
+    const engine = requireSync(sync);
+    const view = change();
+    engine.schedule();
+    return view;
+  };
+
   const youtube = (): YouTubeApi => {
     try {
       return deps.youtube();
@@ -171,13 +193,15 @@ export function createApp(deps: AppDeps) {
       /^\/api\/status$/,
       (): StatusResponse => {
         const state = auth.state(config);
+        const { env, fromSync } = providerEnv(config.env, store);
         return {
           version: VERSION,
           hasClientSecrets: state.clientSecretsError === null,
           ...state,
-          sources: providerStatuses(config.env),
+          sources: withKeySources(providerStatuses(env), fromSync),
           dailyQuota: config.dailyQuota,
           sync: sync ? syncView(sync.status()) : null,
+          keySync: sync ? keySyncView(store, envKeys) : null,
           opensInMusic: musicLinks !== undefined,
         };
       },
@@ -186,8 +210,26 @@ export function createApp(deps: AppDeps) {
       "POST",
       /^\/api\/sources\/test$/,
       async (): Promise<SourceTestResponse> => ({
-        results: await testSources(store, config.env, config.userAgent),
+        results: await testSources(store, providerEnv(config.env, store).env, config.userAgent),
       }),
+    ],
+    [
+      "POST",
+      /^\/api\/keys\/sync$/,
+      async (_, body): Promise<KeySyncView> => {
+        const parsed = await body();
+        return keyRoute(() => setKeySync(store, envKeys, parsed));
+      },
+    ],
+    [
+      "POST",
+      /^\/api\/keys\/share$/,
+      async (): Promise<KeySyncView> => keyRoute(() => shareKeys(store, envKeys)),
+    ],
+    [
+      "POST",
+      /^\/api\/keys\/forget$/,
+      async (): Promise<KeySyncView> => keyRoute(() => forgetKeys(store, envKeys)),
     ],
     [
       "POST",
@@ -232,6 +274,11 @@ export function createApp(deps: AppDeps) {
       },
     ],
     ["GET", /^\/api\/playlists$/, () => store.listPlaylists()],
+    [
+      "GET",
+      /^\/api\/youtube\/playlists$/,
+      (): Promise<LibraryResponse> => libraryPlaylists(youtube()),
+    ],
     [
       "POST",
       /^\/api\/playlists$/,

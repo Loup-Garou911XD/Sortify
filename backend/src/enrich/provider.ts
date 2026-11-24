@@ -15,6 +15,8 @@ export interface TagProvider {
   help: string;
   /** Environment variables it needs (API keys). If any is missing, the provider is off. */
   envVars: string[];
+  /** Optional environment variables it reads, such as a store country. Never required. */
+  settings?: string[];
   /**
    * The service answers without an `access-control-allow-origin` header, so a browser cannot
    * read it: the static build leaves this provider out (see web/src/api.ts). Shells with a

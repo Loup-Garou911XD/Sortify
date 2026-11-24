@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type {
   JobView,
+  KeySyncView,
+  LibraryResponse,
   PlaylistDetail,
   PreviewResponse,
   RunDetail,
@@ -15,6 +17,7 @@ import { Store } from "../src/db.ts";
 import { type AppDeps, createApp, type YouTubeApi } from "../src/server/app.ts";
 import type { SyncEngine } from "../src/sync/engine.ts";
 import { PendingAuthStore } from "../src/youtube/auth.ts";
+import type { OwnPlaylist } from "../src/youtube/client.ts";
 import { tempDir, testConfig } from "./helpers.ts";
 
 class FakeYouTube implements YouTubeApi {
@@ -33,7 +36,7 @@ class FakeYouTube implements YouTubeApi {
   async videoDetails(ids: string[]) {
     return new Map(ids.map((id) => [id, { durationS: 200, topics: ["Pop music"] }]));
   }
-  async myPlaylists() {
+  async myPlaylists(): Promise<OwnPlaylist[]> {
     return [];
   }
   async playlistVideoIds() {
@@ -159,6 +162,78 @@ describe("api", () => {
     ]);
     expect(body.sources[2]).toMatchObject({ label: "Last.fm", envVars: ["LASTFM_API_KEY"] });
     expect(body.signedIn).toBe(false);
+  });
+
+  it("lists the user's playlists, Liked videos first, without ones Sortify made", async () => {
+    const { api, yt } = await setup();
+    yt.myPlaylists = async () => [
+      { id: "PLmine", title: "Road trip", description: "", count: 42 },
+      { id: "PLmade", title: "Big Mix - House", description: "[sortify run 1 group 2]", count: 2 },
+      { id: "PLnocount", title: "Old", description: "" },
+    ];
+    const { status, body } = await api<LibraryResponse>("/api/youtube/playlists");
+    expect(status).toBe(200);
+    expect(body.playlists).toEqual([
+      { playlistId: "LL", title: "Liked videos", count: null },
+      { playlistId: "PLmine", title: "Road trip", count: 42 },
+      { playlistId: "PLnocount", title: "Old", count: null },
+    ]);
+  });
+
+  it("asks to connect YouTube before listing playlists", async () => {
+    const { api } = await setup({
+      youtube: () => {
+        throw new Error("Connect YouTube first.");
+      },
+    });
+    const { status, body } = await api<{ error: string }>("/api/youtube/playlists");
+    expect(status).toBe(401);
+    expect(body.error).toMatch(/Connect YouTube/);
+  });
+
+  it("syncs tag-source keys only with sync on, and says where each key came from", async () => {
+    const off = await setup();
+    expect((await off.api<StatusResponse>("/api/status")).body.keySync).toBeNull();
+    expect(
+      (await off.api("/api/keys/sync", { method: "POST", body: { enabled: true } })).status,
+    ).toBe(409);
+
+    let pushes = 0;
+    const sync = {
+      sync: async () => ({ state: "idle", at: "2026-01-01T00:00:00.000Z" }),
+      status: () => ({ state: "idle", at: "2026-01-01T00:00:00.000Z" }),
+      schedule: () => {
+        pushes++;
+      },
+    } as unknown as SyncEngine;
+    const { api, store } = await setup({ sync });
+    // Another device shared a Last.fm key; this one has Discogs in its own .env.
+    store.putSyncedKeys([{ name: "LASTFM_API_KEY", value: "l", at: new Date().toISOString() }]);
+
+    const before = (await api<StatusResponse>("/api/status")).body;
+    expect(before.keySync).toEqual({
+      enabled: false,
+      inDrive: ["LASTFM_API_KEY"],
+      keysMovable: false,
+    });
+    expect(before.sources.find((s) => s.id === "lastfm")?.configured).toBe(false);
+
+    const on = await api<KeySyncView>("/api/keys/sync", {
+      method: "POST",
+      body: { enabled: true },
+    });
+    expect(on.body).toEqual({ enabled: true, inDrive: ["LASTFM_API_KEY"], keysMovable: false });
+    const after = (await api<StatusResponse>("/api/status")).body;
+    expect(after.sources.find((s) => s.id === "lastfm")).toMatchObject({
+      configured: true,
+      fromDrive: true,
+    });
+    expect(after.sources.find((s) => s.id === "discogs")?.fromDrive).toBeUndefined();
+    expect(after.keySync?.keysMovable).toBe(false);
+
+    const shared = await api<KeySyncView>("/api/keys/share", { method: "POST" });
+    expect(shared.body.inDrive).toEqual(["DISCOGS_TOKEN", "LASTFM_API_KEY"]);
+    expect(pushes).toBe(2);
   });
 
   it("syncs on demand, or says sync is off", async () => {

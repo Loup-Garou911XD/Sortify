@@ -11,8 +11,6 @@ const MIN_SIMILARITY = 0.6;
 export interface SpotifyMatch {
   /** Spotify track id. */
   id: string;
-  /** The matched artist. No longer read (see `Spotify`); kept so older entries still parse. */
-  artistId: string;
   /**
    * Release year of the album the track was found on; `null` when Spotify gives none. Absent in
    * entries cached before it was read; those are asked again (see `lacksYear`).
@@ -114,17 +112,12 @@ export function pickTrack(
   artist: string,
   title: string,
 ): SpotifyMatch | null {
-  const credited = (body?.tracks?.items ?? []).flatMap((item) => {
-    const a = item.artists.find((x) => similarity(x.name, artist) >= MIN_SIMILARITY);
-    return a ? [{ item, artistId: a.id }] : [];
-  });
-  const best = bestMatch(credited, (c) => similarity(c.item.name, title), MIN_SIMILARITY);
+  const credited = (body?.tracks?.items ?? []).filter((item) =>
+    item.artists.some((x) => similarity(x.name, artist) >= MIN_SIMILARITY),
+  );
+  const best = bestMatch(credited, (item) => similarity(item.name, title), MIN_SIMILARITY);
   if (!best) return null;
-  return {
-    id: best.item.id,
-    artistId: best.artistId,
-    year: yearOf(best.item.album?.release_date) ?? null,
-  };
+  return { id: best.id, year: yearOf(best.album?.release_date) ?? null };
 }
 
 export const spotify: TagProvider = {

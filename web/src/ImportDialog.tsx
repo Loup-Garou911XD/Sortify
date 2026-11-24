@@ -7,7 +7,8 @@
  */
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Button, Field, Notice } from "../../frontend/src/components/ui.tsx";
-import { KEYS, type KeyId, type ParsedEnv, parseEnv, saveKeys } from "./settings.ts";
+import { saveProviderKeys } from "./api.ts";
+import { KEYS, type KeyId, type ParsedEnv, parseEnv } from "./settings.ts";
 
 const keyCount = (n: number): string => (n === 1 ? "1 key" : `${n} keys`);
 
@@ -42,7 +43,7 @@ export function ImportDialog({ onClose, onSaved }: { onClose: () => void; onSave
   const save = () => {
     const keys = result?.keys;
     if (!keys) return;
-    saveKeys(keys as Record<string, string>);
+    saveProviderKeys(keys as Record<string, string>);
     setSaved(true);
     onSaved();
   };

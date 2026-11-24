@@ -9,8 +9,9 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { ProviderStatus } from "../../backend/src/api/types.ts";
 import { Button, Field, Notice } from "../../frontend/src/components/ui.tsx";
+import { effectiveKeys, saveProviderKeys } from "./api.ts";
 import { redirectUri } from "./auth.ts";
-import { getKeys, KEYS, type KeyId, SOURCE_GUIDES, saveKeys } from "./settings.ts";
+import { KEYS, type KeyId, SOURCE_GUIDES } from "./settings.ts";
 
 /** Steps carry this deploy's own URLs, so they can be copied without editing. */
 function fill(step: string): string {
@@ -44,7 +45,8 @@ export function KeyDialog({
 
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState<Record<string, string>>(() => {
-    const stored = getKeys();
+    // What is in use, synced keys included, so the dialog shows the key the source runs on.
+    const stored = effectiveKeys();
     return Object.fromEntries(fields.map((id) => [id, stored[id] ?? ""]));
   });
   const [saved, setSaved] = useState(false);
@@ -55,7 +57,7 @@ export function KeyDialog({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    saveKeys(draft);
+    saveProviderKeys(draft);
     setSaved(true);
     onSaved();
   };
@@ -110,9 +112,10 @@ export function KeyDialog({
                 </Field>
               ))}
               <p className="hint">
-                Kept in this browser's local storage and sent only to {title}. Anything that can run
-                script on this page could read it, so use a key you are willing to keep in a browser
-                and revoke it if you stop using this site.
+                Kept in this browser's local storage and sent only to {title}, or with key sync on,
+                in your Google Drive's hidden Sortify folder. Anything that can run script on this
+                page could read it, so use a key you are willing to keep in a browser and revoke it
+                if you stop using this site.
               </p>
             </div>
           )}

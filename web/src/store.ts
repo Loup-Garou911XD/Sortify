@@ -20,6 +20,7 @@ import type {
   TrackTag,
 } from "../../backend/src/db.ts";
 import { isCachedMiss } from "../../backend/src/enrich/cache.ts";
+import { type KeySnapshot, syncableEntries } from "../../backend/src/sync/keys.ts";
 import {
   type MergeNotes,
   mergeSnapshots,
@@ -33,8 +34,9 @@ const DB_NAME = "sortify";
 /**
  * 2 split the single blob-per-collection store into one record per track, tag and lookup.
  * 3 added `deleted`, the tombstones that stop a sync resurrecting a deleted playlist.
+ * 4 added `keys`, the tag-source keys that travel in the sync file (see sync/keys.ts).
  */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 /** The v1 store: one record per collection. Read once on upgrade, then dropped. */
 const LEGACY = "records";
 const FLUSH_MS = 600;
@@ -65,9 +67,20 @@ const cacheEntry = (stored: unknown): CacheEntry =>
  * run list, its groups and the id counters are small and always change together, so they stay
  * one record under RUNS_KEY.
  */
-const STORES = ["playlists", "tracks", "tags", "cache", "runs", "items", "deleted"] as const;
+const STORES = [
+  "playlists",
+  "tracks",
+  "tags",
+  "cache",
+  "runs",
+  "items",
+  "deleted",
+  "keys",
+] as const;
 type StoreName = (typeof STORES)[number];
 const RUNS_KEY = "state";
+/** localStorage prefix for `localSetting`. */
+const LOCAL_PREFIX = "sortify-setting:";
 
 const now = (): string => new Date().toISOString();
 
@@ -201,6 +214,8 @@ export class BrowserStore implements Syncable {
   private groups: RunGroup[] = [];
   private readonly items = new Map<number, RunItem[]>();
   private seq = { run: 0, group: 0 };
+  /** Tag-source keys from the sync file, by name, removals included. */
+  private readonly syncedKeyMap = new Map<string, KeySnapshot>();
 
   /** Keys written since the last flush, per store; a key absent from the model is deleted. */
   /** Called after a write settles, so the owner can ask for a sync. */
@@ -254,7 +269,7 @@ export class BrowserStore implements Syncable {
       ]);
       return keys.map((k, i) => [String(k), values[i] as V]);
     };
-    const [playlists, tracks, tags, cache, runs, items, deleted] = await Promise.all([
+    const [playlists, tracks, tags, cache, runs, items, deleted, keys] = await Promise.all([
       entries<PlaylistRow>("playlists"),
       entries<TrackRow>("tracks"),
       entries<Tag[]>("tags"),
@@ -262,6 +277,7 @@ export class BrowserStore implements Syncable {
       entries<RunHeader>("runs"),
       entries<RunItem[]>("items"),
       entries<string>("deleted"),
+      entries<KeySnapshot>("keys"),
     ]);
     for (const [k, v] of playlists) this.playlists.set(k, v);
     for (const [k, v] of tracks) this.tracks.set(k, v);
@@ -269,6 +285,7 @@ export class BrowserStore implements Syncable {
     for (const [k, v] of cache) this.cache.set(k, cacheEntry(v));
     for (const [k, v] of items) this.items.set(Number(k), v);
     for (const [k, v] of deleted) this.deleted.set(k, v);
+    for (const k of syncableEntries(keys.map(([, v]) => v))) this.syncedKeyMap.set(k.name, k);
     const header = runs.find(([k]) => k === RUNS_KEY)?.[1];
     if (header) {
       this.runs = header.runs;
@@ -337,6 +354,8 @@ export class BrowserStore implements Syncable {
         return this.items.get(Number(key));
       case "deleted":
         return this.deleted.get(key);
+      case "keys":
+        return this.syncedKeyMap.get(key);
       default:
         return {
           runs: this.runs,
@@ -739,6 +758,42 @@ export class BrowserStore implements Syncable {
     });
   }
 
+  // --- synced keys and local settings ---------------------------------------------
+
+  /** See the SQLite store's `syncedKeys`. */
+  syncedKeys(): KeySnapshot[] {
+    return [...this.syncedKeyMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** See the SQLite store's `putSyncedKeys`. The write schedules a sync, like any other. */
+  putSyncedKeys(changes: KeySnapshot[]): void {
+    for (const k of syncableEntries(changes)) {
+      this.syncedKeyMap.set(k.name, k);
+      this.touch("keys", k.name);
+    }
+  }
+
+  /**
+   * A setting for this browser alone. It lives in localStorage rather than IndexedDB, beside the
+   * keys this browser holds itself, and is never synced.
+   */
+  localSetting(name: string): string | undefined {
+    try {
+      return localStorage.getItem(LOCAL_PREFIX + name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  setLocalSetting(name: string, value: string | null): void {
+    try {
+      if (value === null) localStorage.removeItem(LOCAL_PREFIX + name);
+      else localStorage.setItem(LOCAL_PREFIX + name, value);
+    } catch {
+      // Storage blocked: the setting holds for this page only, which is the safe default (off).
+    }
+  }
+
   // --- sync ---------------------------------------------------------------------
 
   /** Everything worth carrying between devices, in the shape both stores agree on. */
@@ -765,6 +820,7 @@ export class BrowserStore implements Syncable {
       }),
       deleted: [...this.deleted].map(([playlistId, at]) => ({ playlistId, at })),
       deletedRuns: [...this.deletedRuns.values()],
+      keys: this.syncedKeys(),
       runs: this.runs.map((run) => ({
         ...run,
         groups: this.runGroups(run.runId).map((g) => ({
@@ -829,6 +885,12 @@ export class BrowserStore implements Syncable {
     }
     this.deletedRuns.clear();
     for (const t of merged.deletedRuns) this.deletedRuns.set(runGraveKey(t), t);
+    for (const name of this.syncedKeyMap.keys()) this.touch("keys", name);
+    this.syncedKeyMap.clear();
+    for (const k of merged.keys) {
+      this.syncedKeyMap.set(k.name, k);
+      this.touch("keys", k.name);
+    }
     this.runs = merged.runs.map(({ groups: _groups, ...run }) => run);
     this.groups = merged.runs.flatMap((run) =>
       run.groups.map((g) => ({

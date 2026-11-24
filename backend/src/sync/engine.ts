@@ -14,8 +14,11 @@
  * merge of local and remote — so the overwritten device restores its data on its next sync.
  * It is why a device must keep syncing rather than push once and forget.
  */
+
+import type { DriveUsage } from "../api/types.ts";
 import { DriveAuthError, type DriveSnapshots, type RemoteFile } from "./drive.ts";
 import type { MergeNotes, Snapshot, Syncable } from "./snapshot.ts";
+import { snapshotUsage } from "./usage.ts";
 
 export type SyncState = "idle" | "syncing" | "offline" | "needs-auth";
 
@@ -25,6 +28,8 @@ export interface SyncResult {
   notes?: MergeNotes;
   /** Why syncing is not working, for showing the user. */
   message?: string;
+  /** What is in the Drive file, as of this device's last upload. Kept across cycles. */
+  usage?: DriveUsage;
   at: string;
 }
 
@@ -38,6 +43,7 @@ export class SyncEngine {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running: Promise<SyncResult> | undefined;
   private last: SyncResult = { state: "idle", at: new Date(0).toISOString() };
+  private usage: DriveUsage | undefined;
 
   private readonly store: Syncable;
   private readonly drive: DriveSnapshots;
@@ -81,7 +87,11 @@ export class SyncEngine {
   }
 
   private settle(result: Omit<SyncResult, "at">): SyncResult {
-    this.last = { ...result, at: new Date().toISOString() };
+    this.last = {
+      ...result,
+      ...(this.usage ? { usage: this.usage } : {}),
+      at: new Date().toISOString(),
+    };
     this.onChange?.(this.last);
     return this.last;
   }
@@ -98,11 +108,14 @@ export class SyncEngine {
           if (remote.modifiedTime !== this.known?.modifiedTime) {
             notes = this.store.absorb(await this.drive.download(remote));
           }
-          const written = await this.push(remote);
-          if (!written) continue; // Someone else wrote first; start again from their copy.
-          this.known = written;
+          const pushed = await this.push(remote);
+          if (!pushed) continue; // Someone else wrote first; start again from their copy.
+          this.known = pushed.file;
+          this.usage = snapshotUsage(pushed.snapshot, pushed.file.size);
         } else {
-          this.known = await this.drive.create(this.store.snapshot());
+          const snapshot = this.store.snapshot();
+          this.known = await this.drive.create(snapshot);
+          this.usage = snapshotUsage(snapshot, this.known.size);
         }
         return this.settle({ state: "idle", ...(notes ? { notes } : {}) });
       }
@@ -122,10 +135,14 @@ export class SyncEngine {
   }
 
   /** Writes the merged snapshot, unless the remote moved between the merge and now. */
-  private async push(seen: RemoteFile): Promise<RemoteFile | undefined> {
+  private async push(
+    seen: RemoteFile,
+  ): Promise<{ file: RemoteFile; snapshot: Snapshot } | undefined> {
     const current = await this.drive.find();
     if (current && current.modifiedTime !== seen.modifiedTime) return undefined;
-    return await this.drive.update(seen, this.store.snapshot());
+    // Taken after the check, right before the write, so it holds every local change so far.
+    const snapshot = this.store.snapshot();
+    return { file: await this.drive.update(seen, snapshot), snapshot };
   }
 }
 

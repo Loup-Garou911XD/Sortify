@@ -107,7 +107,8 @@ export const SOURCE_GUIDES: Record<string, SourceGuide> = {
   },
   spotify: {
     title: "Spotify",
-    blurb: "Detailed artist genres, for example desi hip hop or punjabi pop.",
+    blurb:
+      "Release years, for sorting by decade. No genres: Spotify withholds them from personal apps.",
     docsUrl: "https://developer.spotify.com/dashboard",
     docsLabel: "Spotify developer dashboard",
     steps: [

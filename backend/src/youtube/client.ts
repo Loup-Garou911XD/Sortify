@@ -3,6 +3,21 @@ const API = "https://www.googleapis.com/youtube/v3";
 /** Quota units per call, from the YouTube Data API quota table. */
 export const QUOTA_COST = { list: 1, insert: 50 } as const;
 
+/**
+ * The signed-in user's liked videos. Songs liked in YouTube Music are YouTube likes, so they are
+ * here too; YouTube Music's own "Liked Music" list (LM) is not reachable through the Data API.
+ */
+export const LIKED_VIDEOS = "LL";
+export const LIKED_VIDEOS_TITLE = "Liked videos";
+
+export interface OwnPlaylist {
+  id: string;
+  title: string;
+  description: string;
+  /** Videos in it, as YouTube counts them (deleted and private ones included). */
+  count?: number | undefined;
+}
+
 export class QuotaExceededError extends Error {
   constructor() {
     super("YouTube Data API daily quota exceeded");
@@ -128,8 +143,10 @@ export class YouTubeClient {
       QUOTA_COST.list,
     );
     const item = data.items?.[0];
-    if (!item) throw new Error(`Playlist ${playlistId} not found or not visible to this account`);
-    return item.snippet.title;
+    if (item) return item.snippet.title;
+    // The liked-videos list is readable item by item, but may not be listed as a playlist.
+    if (playlistId === LIKED_VIDEOS) return LIKED_VIDEOS_TITLE;
+    throw new Error(`Playlist ${playlistId} not found or not visible to this account`);
   }
 
   /** All playable entries in a playlist, in order. Deleted and private videos are skipped. */
@@ -202,21 +219,40 @@ export class YouTubeClient {
   }
 
   /** The signed-in user's playlists, with descriptions (used to find Sortify's own). */
-  async myPlaylists(): Promise<{ id: string; title: string; description: string }[]> {
-    const out: { id: string; title: string; description: string }[] = [];
+  /**
+   * The playlists the signed-in user owns, YouTube Music ones included, in YouTube's order. Not
+   * the liked-videos list (see LIKED_VIDEOS) and not other people's playlists they saved.
+   */
+  async myPlaylists(): Promise<OwnPlaylist[]> {
+    const out: OwnPlaylist[] = [];
     let pageToken: string | undefined;
     do {
       const data = await this.request<{
         nextPageToken?: string;
-        items: { id: string; snippet: { title: string; description: string } }[];
+        items: {
+          id: string;
+          snippet: { title: string; description: string };
+          contentDetails?: { itemCount?: number };
+        }[];
       }>(
         "GET",
         "playlists",
-        { part: "snippet", mine: "true", maxResults: "50", ...(pageToken ? { pageToken } : {}) },
+        {
+          // contentDetails costs nothing extra: a list call is 1 unit whatever its parts.
+          part: "snippet,contentDetails",
+          mine: "true",
+          maxResults: "50",
+          ...(pageToken ? { pageToken } : {}),
+        },
         QUOTA_COST.list,
       );
       for (const item of data.items) {
-        out.push({ id: item.id, title: item.snippet.title, description: item.snippet.description });
+        out.push({
+          id: item.id,
+          title: item.snippet.title,
+          description: item.snippet.description,
+          count: item.contentDetails?.itemCount,
+        });
       }
       pageToken = data.nextPageToken;
     } while (pageToken);

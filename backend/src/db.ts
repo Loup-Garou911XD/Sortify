@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { DIMENSIONS, type Dimension, GROUP_BY, type TagSource } from "./api/types.ts";
 import { isCachedMiss } from "./enrich/cache.ts";
+import { type KeySnapshot, syncableEntries } from "./sync/keys.ts";
 import {
   type MergeNotes,
   mergeSnapshots,
@@ -132,6 +133,18 @@ CREATE TABLE IF NOT EXISTS deleted_runs (
   source_playlist_id TEXT NOT NULL,
   deleted_at         TEXT NOT NULL,
   PRIMARY KEY (created_at, source_playlist_id)
+);
+
+-- Tag-source API keys from the sync file (see sync/keys.ts). A NULL value marks a removal.
+CREATE TABLE IF NOT EXISTS synced_keys (
+  name  TEXT PRIMARY KEY,
+  value TEXT,
+  at    TEXT NOT NULL
+);
+-- This device's own settings, such as whether it uses the synced keys. Never synced.
+CREATE TABLE IF NOT EXISTS local_settings (
+  name  TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lookup_cache (
@@ -610,6 +623,43 @@ export class Store implements Syncable {
     });
   }
 
+  // --- synced keys and local settings ---------------------------------------------
+
+  /** Tag-source keys from the sync file, removals included (see sync/keys.ts). */
+  syncedKeys(): KeySnapshot[] {
+    return this.prep(
+      "SELECT name, value, at FROM synced_keys ORDER BY name",
+    ).all() as unknown as KeySnapshot[];
+  }
+
+  /** Records key changes made on this device; they travel on the next sync. */
+  putSyncedKeys(changes: KeySnapshot[]): void {
+    const put = this.prep(
+      `INSERT INTO synced_keys (name, value, at) VALUES (?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET value = excluded.value, at = excluded.at`,
+    );
+    this.tx(() => {
+      for (const k of syncableEntries(changes)) put.run(k.name, k.value, k.at);
+    });
+  }
+
+  /** A setting that belongs to this device alone and is never synced. */
+  localSetting(name: string): string | undefined {
+    const row = this.prep("SELECT value FROM local_settings WHERE name = ?").get(name) as
+      | { value: string }
+      | undefined;
+    return row?.value;
+  }
+
+  setLocalSetting(name: string, value: string | null): void {
+    if (value === null) this.prep("DELETE FROM local_settings WHERE name = ?").run(name);
+    else
+      this.prep(
+        `INSERT INTO local_settings (name, value) VALUES (?, ?)
+           ON CONFLICT (name) DO UPDATE SET value = excluded.value`,
+      ).run(name, value);
+  }
+
   // --- sync ---------------------------------------------------------------------
 
   /** Everything worth carrying between devices, in the shape both stores agree on. */
@@ -693,6 +743,7 @@ export class Store implements Syncable {
         `SELECT created_at AS createdAt, source_playlist_id AS sourcePlaylistId,
                 deleted_at AS at FROM deleted_runs`,
       ),
+      keys: this.syncedKeys(),
       runs: this.listRuns().map((run) => ({
         ...run,
         groups: (groups.get(run.runId) ?? []).map((g) => ({
@@ -721,6 +772,7 @@ export class Store implements Syncable {
         "lookup_cache",
         "deleted_playlists",
         "deleted_runs",
+        "synced_keys",
       ]) {
         this.prep(`DELETE FROM ${table}`).run();
       }
@@ -779,6 +831,8 @@ export class Store implements Syncable {
         "INSERT INTO deleted_runs (created_at, source_playlist_id, deleted_at) VALUES (?, ?, ?)",
       );
       for (const t of merged.deletedRuns) runGrave.run(t.createdAt, t.sourcePlaylistId, t.at);
+      const key = this.prep("INSERT INTO synced_keys (name, value, at) VALUES (?, ?, ?)");
+      for (const k of merged.keys) key.run(k.name, k.value, k.at);
       const run = this.prep(
         `INSERT INTO runs (run_id, source_playlist_id, dimension, min_size, created_at, status,
            quota_used, writes_done) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

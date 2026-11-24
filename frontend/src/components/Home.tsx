@@ -13,7 +13,7 @@ export function Home() {
     },
     {
       title: "Add a playlist",
-      text: "Paste a YouTube or YouTube Music playlist link in the sidebar.",
+      text: "Press Add a playlist in the sidebar, then paste a link or pick one of your playlists.",
       done: playlists.length > 0,
     },
     {

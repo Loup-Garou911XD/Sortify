@@ -11,6 +11,8 @@ import type {
   CreateRunRequest,
   EnrichRequest,
   JobView,
+  KeySyncView,
+  LibraryResponse,
   PlaylistDetail,
   PreviewRequest,
   PreviewResponse,
@@ -32,6 +34,16 @@ import {
 import { planGroups } from "../../backend/src/planner.ts";
 import { JobBusyError, JobRunner } from "../../backend/src/server/jobs.ts";
 import {
+  type DeviceKeys,
+  forgetKeys,
+  keySyncView,
+  moveToSync,
+  requireSync,
+  setKeySync,
+  shareKeys,
+} from "../../backend/src/server/keys.ts";
+import { libraryPlaylists } from "../../backend/src/server/library.ts";
+import {
   groupMusicLink,
   runDetail,
   runSummary,
@@ -46,6 +58,12 @@ import {
 } from "../../backend/src/server/validate.ts";
 import { DriveSnapshots } from "../../backend/src/sync/drive.ts";
 import { SyncEngine } from "../../backend/src/sync/engine.ts";
+import {
+  providerEnv,
+  SYNCABLE_KEYS,
+  usesSyncedKeys,
+  withKeySources,
+} from "../../backend/src/sync/keys.ts";
 import { syncView } from "../../backend/src/sync/view.ts";
 import { TagMapper } from "../../backend/src/tagging/mapper.ts";
 import { YouTubeClient } from "../../backend/src/youtube/client.ts";
@@ -53,7 +71,7 @@ import { parsePlaylistId } from "../../backend/src/youtube/playlistUrl.ts";
 import type { musicLink } from "../../backend/src/youtube/watchLinks.ts";
 import type * as httpApi from "../../frontend/src/api.ts";
 import { completeAuth, getAccessToken, isSignedIn, signOut, startAuth } from "./auth.ts";
-import { getKeys, hasGoogleClient } from "./settings.ts";
+import { getKeys, hasGoogleClient, saveKeys } from "./settings.ts";
 import type { BrowserStore } from "./store.ts";
 
 const VERSION = "0.1.0";
@@ -108,7 +126,7 @@ function enrichers(maxApiCalls?: number): { enrichers: Enrichers; budget: Budget
     enrichers: {
       mapper: new TagMapper(),
       // Nothing a browser cannot read: those services answer with no CORS origin header.
-      clients: createProviderClients(deps, getKeys(), SERVER_ONLY),
+      clients: createProviderClients(deps, effectiveKeys(), SERVER_ONLY),
     },
   };
 }
@@ -134,6 +152,36 @@ function startJob(...args: Parameters<JobRunner["start"]>): JobView {
   }
 }
 
+// --- keys ---------------------------------------------------------------------------
+
+/** This browser's own keys, which it can move into the sync file and back (see server/keys.ts). */
+const browserKeys: DeviceKeys = { read: getKeys, write: saveKeys };
+
+/** Key changes travel in the sync file; the store's write hook schedules the push. */
+function keyRoute(change: () => KeySyncView): KeySyncView {
+  requireSync(sync);
+  return change();
+}
+
+/** The keys providers see here: this browser's own, with synced ones filling gaps if opted in. */
+export function effectiveKeys(): Record<string, string | undefined> {
+  return providerEnv(getKeys(), ready()).env;
+}
+
+/**
+ * Saves keys from the key dialogs. With key sync on, tag-source keys go to the sync file instead
+ * of this browser (a local copy would win over an edit made on another device); the Google
+ * client always stays here.
+ */
+export function saveProviderKeys(values: Record<string, string>): void {
+  if (!sync || !usesSyncedKeys(ready())) {
+    saveKeys(values);
+    return;
+  }
+  saveKeys(Object.fromEntries(Object.entries(values).filter(([n]) => !SYNCABLE_KEYS.includes(n))));
+  moveToSync(ready(), browserKeys, values);
+}
+
 // --- the routes ----------------------------------------------------------------------
 
 type Handler = (params: string[], body: Record<string, unknown>) => unknown;
@@ -142,26 +190,45 @@ const routes: [string, RegExp, Handler][] = [
   [
     "GET",
     /^\/api\/status$/,
-    (): StatusResponse => ({
-      version: VERSION,
-      // On a static deploy the "client secrets" are the two keys the user pasted.
-      hasClientSecrets: hasGoogleClient(),
-      clientSecretsError: hasGoogleClient()
-        ? null
-        : "Open Connections in the top bar and pick YouTube to add your Google client ID and secret.",
-      signedIn: isSignedIn(),
-      sources: providerStatuses(getKeys(), SERVER_ONLY),
-      dailyQuota: DAILY_QUOTA,
-      sync: sync ? syncView(sync.status()) : null,
-      opensInMusic: musicLinks !== undefined,
-    }),
+    (): StatusResponse => {
+      const { env, fromSync } = providerEnv(getKeys(), ready());
+      return {
+        version: VERSION,
+        // On a static deploy the "client secrets" are the two keys the user pasted.
+        hasClientSecrets: hasGoogleClient(),
+        clientSecretsError: hasGoogleClient()
+          ? null
+          : "Open Connections in the top bar and pick YouTube to add your Google client ID and secret.",
+        signedIn: isSignedIn(),
+        sources: withKeySources(providerStatuses(env, SERVER_ONLY), fromSync),
+        dailyQuota: DAILY_QUOTA,
+        sync: sync ? syncView(sync.status()) : null,
+        keySync: sync ? keySyncView(ready(), browserKeys) : null,
+        opensInMusic: musicLinks !== undefined,
+      };
+    },
   ],
   [
     "POST",
     /^\/api\/sources\/test$/,
     async (): Promise<SourceTestResponse> => ({
-      results: await testSources(ready(), getKeys(), `Sortify/${VERSION}`, SERVER_ONLY),
+      results: await testSources(ready(), effectiveKeys(), `Sortify/${VERSION}`, SERVER_ONLY),
     }),
+  ],
+  [
+    "POST",
+    /^\/api\/keys\/sync$/,
+    (_p, body): KeySyncView => keyRoute(() => setKeySync(ready(), browserKeys, body)),
+  ],
+  [
+    "POST",
+    /^\/api\/keys\/share$/,
+    (): KeySyncView => keyRoute(() => shareKeys(ready(), browserKeys)),
+  ],
+  [
+    "POST",
+    /^\/api\/keys\/forget$/,
+    (): KeySyncView => keyRoute(() => forgetKeys(ready(), browserKeys)),
   ],
   [
     "POST",
@@ -193,6 +260,11 @@ const routes: [string, RegExp, Handler][] = [
   ],
 
   ["GET", /^\/api\/playlists$/, () => ready().listPlaylists()],
+  [
+    "GET",
+    /^\/api\/youtube\/playlists$/,
+    (): Promise<LibraryResponse> => libraryPlaylists(youtube()),
+  ],
   [
     "POST",
     /^\/api\/playlists$/,

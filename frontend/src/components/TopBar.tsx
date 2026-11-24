@@ -6,7 +6,7 @@ import type {
 } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import type { Theme } from "../hooks.ts";
+import { plural, type Theme } from "../hooks.ts";
 import {
   IconClose,
   IconGitHub,
@@ -16,22 +16,16 @@ import {
   IconMoon,
   IconPlay,
   IconPlug,
-  IconRefresh,
   IconSignIn,
   IconSignOut,
   IconSun,
 } from "./icons.tsx";
-import { Button, Menu, MenuItem } from "./ui.tsx";
+import { KeySyncDialog } from "./KeySyncDialog.tsx";
+import { SYNC_LABEL, SYNC_TONE, SyncDialog } from "./SyncDialog.tsx";
+import { Button, Menu, MenuItem, type Tone } from "./ui.tsx";
 
 /** Where the source lives; shown in the top bar and the only outward link the app carries. */
 const REPO_URL = "https://github.com/Loup-Garou911XD/Sortify";
-
-/**
- * How a connection reads at a glance: working, not set up, busy, or broken. The dot and the
- * spinning ring in the top bar are the same four, so the trigger and the panel never disagree.
- * `warn` is the fifth, used only on a tag source a test found answering with nothing usable.
- */
-type Tone = "on" | "off" | "sync" | "bad" | "warn";
 
 /**
  * One row of the Connections panel. It is a plain block normally, and a button when the shell
@@ -92,20 +86,6 @@ function SourceRow({
   );
 }
 
-const SYNC_LABEL = {
-  idle: "Up to date",
-  syncing: "Syncing\u2026",
-  offline: "Not reachable",
-  "needs-auth": "Needs sign-in",
-} as const;
-
-const SYNC_TONE = {
-  idle: "on",
-  syncing: "sync",
-  offline: "bad",
-  "needs-auth": "bad",
-} as const satisfies Record<SyncView["state"], Tone>;
-
 /** The dot's own wording. Short on purpose: the panel below carries the detail and the fix. */
 const SYNC_DOT_TEXT = {
   idle: "Up to date with Google Drive",
@@ -124,24 +104,6 @@ function connection(signedIn: boolean, sync: SyncView | null): { tone: Tone; tex
   }
   if (signedIn) return { tone: "on", text: sync ? SYNC_DOT_TEXT.idle : "YouTube connected" };
   return { tone: "off", text: "Not connected" };
-}
-
-/** What the Drive row says under its name: the problem if there is one, else what it does. */
-function syncHelp(sync: SyncView): string {
-  if (sync.message) return sync.message;
-  const notes: string[] = [];
-  if (sync.renamedRuns.length > 0) {
-    const moved = sync.renamedRuns.map((r) => `${r.from} \u2192 ${r.to}`).join(", ");
-    notes.push(`Plans renumbered to keep them apart from another device's: ${moved}.`);
-  }
-  if (sync.conflictedRuns.length > 0) {
-    notes.push(
-      `Plan ${sync.conflictedRuns.join(", ")} is part-created on two devices and was left alone; finish or delete it on one of them.`,
-    );
-  }
-  return notes.length > 0
-    ? notes.join(" ")
-    : "Playlists, tags and plans are kept in step across your devices.";
 }
 
 const TEST_TONE = {
@@ -170,22 +132,15 @@ export function TopBar({
   drawerOpen: boolean;
   onToggleDrawer: () => void;
 }) {
-  const {
-    status,
-    sync,
-    theme,
-    setTheme,
-    openSignIn,
-    syncNow,
-    refresh,
-    notify,
-    navigate,
-    configureSource,
-  } = useApp();
+  const { status, sync, theme, setTheme, openSignIn, refresh, notify, navigate, configureSource } =
+    useApp();
   const [signingOut, setSigningOut] = useState(false);
   /** The last connection test, per provider id; undefined until one has run. */
   const [tests, setTests] = useState<Record<string, SourceTestResult>>();
   const [testing, setTesting] = useState(false);
+  /** Which popup the Sync rows opened. */
+  const [dialog, setDialog] = useState<"sync" | "keys" | null>(null);
+  const keySync = status?.keySync ?? null;
 
   const sources = status?.sources ?? [];
   const ready = sources.filter((s) => s.configured).length;
@@ -235,11 +190,12 @@ export function TopBar({
     if (testing) return "sync";
     return TEST_TONE[tests?.[id]?.status ?? "works"];
   };
-  const sourceState = (id: string, configured: boolean): string => {
+  const sourceState = (id: string, configured: boolean, fromDrive: boolean): string => {
     if (!configured) return "Off";
     if (testing) return "Testing";
     const status = tests?.[id]?.status;
-    return status ? TEST_LABEL[status] : "Ready";
+    if (status) return TEST_LABEL[status];
+    return fromDrive ? "Synced" : "Ready";
   };
 
   const sourceNote = (id: string, configured: boolean) => {
@@ -247,14 +203,6 @@ export function TopBar({
     if (!result) return undefined;
     const time = result.ms > 0 ? ` (${result.ms} ms)` : "";
     return { text: `${result.message}${time}`, tone: TEST_TONE[result.status] };
-  };
-
-  const manualSync = async () => {
-    try {
-      await syncNow();
-    } catch (err) {
-      notify("error", (err as Error).message);
-    }
   };
 
   return (
@@ -362,33 +310,33 @@ export function TopBar({
                       <SourceRow
                         tone={SYNC_TONE[sync.state]}
                         name="Google Drive"
-                        help={syncHelp(sync)}
-                        onClick={
-                          sync.state === "needs-auth"
-                            ? () => {
-                                close();
-                                openSignIn();
-                              }
-                            : undefined
+                        state={SYNC_LABEL[sync.state]}
+                        help={
+                          sync.message ??
+                          "Playlists, tags and plans are kept in step across your devices."
                         }
-                      />
-                    </ul>
-                    {sync.state !== "needs-auth" && (
-                      <MenuItem
-                        disabled={sync.state === "syncing"}
                         onClick={() => {
                           close();
-                          void manualSync();
+                          setDialog("sync");
                         }}
-                      >
-                        {sync.state === "syncing" ? (
-                          <span className="spinner" aria-hidden />
-                        ) : (
-                          <IconRefresh size={15} />
-                        )}
-                        Sync now
-                      </MenuItem>
-                    )}
+                      />
+                      {keySync && (
+                        <SourceRow
+                          tone={keySync.enabled ? "on" : "off"}
+                          name="API keys"
+                          state={keySync.enabled ? "On" : "Off"}
+                          help={
+                            keySync.enabled
+                              ? `${plural(keySync.inDrive.length, "key")} shared through Drive. Keys on this device come first.`
+                              : "Share tag-source keys between your devices through Drive."
+                          }
+                          onClick={() => {
+                            close();
+                            setDialog("keys");
+                          }}
+                        />
+                      )}
+                    </ul>
                   </>
                 )}
 
@@ -406,7 +354,7 @@ export function TopBar({
                       key={s.id}
                       tone={sourceTone(s.id, s.configured)}
                       name={s.label}
-                      state={sourceState(s.id, s.configured)}
+                      state={sourceState(s.id, s.configured, s.fromDrive === true)}
                       help={s.help}
                       note={sourceNote(s.id, s.configured)}
                       keys={!configureSource && !s.configured ? s.envVars : []}
@@ -475,6 +423,11 @@ export function TopBar({
           </Button>
         )}
       </div>
+
+      {dialog === "sync" && sync && <SyncDialog onClose={() => setDialog(null)} />}
+      {dialog === "keys" && keySync && (
+        <KeySyncDialog initial={keySync} onClose={() => setDialog(null)} />
+      )}
     </header>
   );
 }

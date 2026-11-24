@@ -44,6 +44,10 @@ export function playlistTitle(sourceTitle: string, groupName: string): string {
 export const groupMarker = (group: RunGroup): string =>
   `[sortify run ${group.runId} group ${group.groupId}]`;
 
+/** Whether a description carries any `groupMarker`: a playlist Sortify created. */
+export const hasGroupMarker = (description: string): boolean =>
+  /\[sortify run \d+ group \d+\]/.test(description);
+
 /**
  * Creates one playlist per group and adds its tracks. Progress is saved after every call, so the
  * run can stop at the daily quota or `maxWrites` and resume later without duplicates:

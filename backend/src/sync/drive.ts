@@ -26,6 +26,8 @@ export interface RemoteFile {
   id: string;
   /** Drive's own clock, used to notice that someone else wrote since we last looked. */
   modifiedTime: string;
+  /** Size in bytes, as Drive reports it; absent if it did not say. */
+  size?: number | undefined;
 }
 
 export class DriveAuthError extends Error {
@@ -77,6 +79,19 @@ async function refusal(res: Response): Promise<DriveAuthError> {
 interface FileResource {
   id?: string;
   modifiedTime?: string;
+  /** Drive sends sizes as a decimal string. */
+  size?: string;
+}
+
+/** The file as this client keeps it, or undefined when Drive left out what it needs. */
+function remoteFile(file: FileResource | undefined): RemoteFile | undefined {
+  if (!file?.id || !file.modifiedTime) return undefined;
+  const size = Number(file.size);
+  return {
+    id: file.id,
+    modifiedTime: file.modifiedTime,
+    size: Number.isFinite(size) ? size : undefined,
+  };
 }
 
 export class DriveSnapshots {
@@ -109,15 +124,12 @@ export class DriveSnapshots {
     const params = new URLSearchParams({
       spaces: FOLDER,
       q: `name = '${FILE_NAME}' and trashed = false`,
-      fields: "files(id,modifiedTime)",
+      fields: "files(id,modifiedTime,size)",
       pageSize: "1",
     });
     const res = await this.request(`${FILES}?${params}`);
     const body = (await res.json()) as { files?: FileResource[] };
-    const file = body.files?.[0];
-    return file?.id && file.modifiedTime
-      ? { id: file.id, modifiedTime: file.modifiedTime }
-      : undefined;
+    return remoteFile(body.files?.[0]);
   }
 
   async download(file: RemoteFile): Promise<Snapshot> {
@@ -141,7 +153,7 @@ export class DriveSnapshots {
       `--${boundary}--`,
       "",
     ].join("\r\n");
-    const res = await this.request(`${UPLOAD}?uploadType=multipart&fields=id,modifiedTime`, {
+    const res = await this.request(`${UPLOAD}?uploadType=multipart&fields=id,modifiedTime,size`, {
       method: "POST",
       headers: { "content-type": `multipart/related; boundary=${boundary}` },
       body,
@@ -150,17 +162,20 @@ export class DriveSnapshots {
   }
 
   async update(file: RemoteFile, snapshot: Snapshot): Promise<RemoteFile> {
-    const res = await this.request(`${UPLOAD}/${file.id}?uploadType=media&fields=id,modifiedTime`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(snapshot),
-    });
+    const res = await this.request(
+      `${UPLOAD}/${file.id}?uploadType=media&fields=id,modifiedTime,size`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(snapshot),
+      },
+    );
     return this.asRemote(await res.json());
   }
 
   private asRemote(body: unknown): RemoteFile {
-    const file = body as FileResource;
-    if (!file.id || !file.modifiedTime) throw new Error("Google Drive returned an unusable file.");
-    return { id: file.id, modifiedTime: file.modifiedTime };
+    const file = remoteFile(body as FileResource);
+    if (!file) throw new Error("Google Drive returned an unusable file.");
+    return file;
   }
 }

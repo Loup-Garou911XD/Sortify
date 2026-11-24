@@ -4,11 +4,10 @@ import { App } from "../../frontend/src/App.tsx";
 import "../../frontend/src/styles.css";
 import "./web.css";
 import { providerStatuses } from "../../backend/src/enrich/providers.ts";
-import { boot } from "./api.ts";
+import { boot, effectiveKeys } from "./api.ts";
 import { completeAuth } from "./auth.ts";
 import { ImportDialog } from "./ImportDialog.tsx";
 import { KeyDialog } from "./KeyDialog.tsx";
-import { getKeys } from "./settings.ts";
 import { BrowserStore } from "./store.ts";
 
 /**
@@ -52,7 +51,7 @@ function Root() {
         <KeyDialog
           key={editing}
           sourceId={editing}
-          source={providerStatuses(getKeys()).find((s) => s.id === editing)}
+          source={providerStatuses(effectiveKeys()).find((s) => s.id === editing)}
           onClose={close}
           onSaved={bump}
         />

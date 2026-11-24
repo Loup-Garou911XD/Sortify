@@ -193,6 +193,31 @@ describe("SyncEngine", () => {
     assert.equal(drive.calls.create, 1, "not three files");
   });
 
+  it("reports what is in the Drive file, kept while the next cycle runs", async () => {
+    const drive = new FakeDrive();
+    const store = seeded("PL1", "a");
+    store.cachePut("discogs", "k", { id: "release/1" });
+    const engine = engineFor(store, drive);
+    assert.equal(engine.status().usage, undefined);
+
+    const { usage } = await engine.sync();
+    assert.ok(usage);
+    // The fake reports no size, so the parts' sum stands in for it: the file, give or take the
+    // few bytes of its own punctuation.
+    const whole = new TextEncoder().encode(JSON.stringify(drive.content)).length;
+    assert.ok(Math.abs(usage.bytes - whole) < 100);
+    assert.deepEqual(Object.fromEntries(usage.parts.map((p) => [p.part, p.count])), {
+      playlists: 1,
+      tracks: 1,
+      cache: 1,
+      other: 0,
+    });
+
+    store.savePlaylist("PL2", "Second", [{ videoId: "b", title: "B", channel: "C" }]);
+    const second = await engine.sync();
+    assert.equal(second.usage?.parts.find((p) => p.part === "playlists")?.count, 2);
+  });
+
   it("does not re-download a copy it has already folded in", async () => {
     const drive = new FakeDrive();
     const engine = engineFor(seeded("PL1", "a"), drive);
@@ -240,6 +265,20 @@ describe("DriveSnapshots", () => {
     const file = await drive.create({} as Snapshot);
     assert.equal(auth, "Bearer t");
     assert.equal(file.modifiedTime, "2026-01-01T00:00:00.000Z");
+  });
+
+  it("reads the file size Drive reports, as a number", async () => {
+    const drive = new DriveSnapshots({
+      getAccessToken: token,
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            files: [{ id: "f1", modifiedTime: "2026-01-01T00:00:00.000Z", size: "123456" }],
+          }),
+          { status: 200 },
+        ),
+    });
+    assert.equal((await drive.find())?.size, 123456);
   });
 
   it("turns a refused request into a sign-in problem", async () => {
