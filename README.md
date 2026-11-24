@@ -124,12 +124,13 @@ The local app syncs on start, every five minutes, after each job and on shutdown
 build on load, after writes and when you leave the page. One-off CLI commands need no syncing of
 their own, since their work travels on the server's next cycle.
 
-**API keys can travel too, if you want them to.** Under Connections → Key sync, each device can
-opt in to using the tag-source keys (Discogs, Last.fm, Spotify, the iTunes store) kept in that same
-file. It is off by default, and it is a per-device choice. Keys a device holds itself (`.env`, or
-the browser's own settings) always come first; synced keys only fill the gaps. In the local app,
-"Upload keys from .env to Drive" shares yours; in the browser, turning it on moves your keys
-there. Your Google sign-in and Google client never go to Drive. The file sits in a hidden folder
+**API keys travel too.** Each device uses the tag-source keys (Discogs, Last.fm, Spotify, the
+iTunes store) kept in that same file, unless you turn that off for it under Connections → API
+keys; the choice is per device. Keys a device holds itself (`.env`, or the browser's own
+settings) always come first; synced keys only fill the gaps. Nothing is shared until you say so:
+in the local app, "Upload from .env" copies your keys up; in the browser, "Move to Drive" moves
+them, and keys you enter afterwards go straight to Drive. Your Google sign-in and Google client
+never go to Drive. The file sits in a hidden folder
 only your own OAuth client can read, and reading it already takes a Google sign-in that can do
 far more than these keys, which only read public music metadata. "Remove keys from Drive" removes
 them from every device.

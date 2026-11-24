@@ -98,10 +98,14 @@ export function KeySyncDialog({ initial, onClose }: { initial: KeySyncView; onCl
         }
       />
 
-      {!view.keysMovable && view.enabled && (
+      {view.enabled && view.onDevice.length > 0 && (
         <DialogRow
           label="Share this device's keys"
-          help="Copies the tag-source keys from this device's .env into Drive. The .env file is not changed."
+          help={
+            view.keysMovable
+              ? `This browser holds ${keys(view.onDevice.length)} of its own. Moving them to Drive makes them the synced copy that every device uses.`
+              : `Copies the ${keys(view.onDevice.length)} in this device's .env into Drive. The .env file is not changed.`
+          }
         >
           <Button
             busy={busy === "share"}
@@ -114,7 +118,7 @@ export function KeySyncDialog({ initial, onClose }: { initial: KeySyncView; onCl
             }
           >
             {busy !== "share" && <IconInbox size={15} />}
-            Upload from .env
+            {view.keysMovable ? "Move to Drive" : "Upload from .env"}
           </Button>
         </DialogRow>
       )}

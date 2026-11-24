@@ -101,15 +101,18 @@ JSON through its `.env` import.
   `modifiedTime`. Drive has no compare-and-swap on content, so a push can still be clobbered by
   one landing microseconds earlier; that is safe because every push sends the merge of local and
   remote, so the overwritten device restores its data on its next cycle.
-- **Tag-source keys travel too, opt-in per device** (`sync/keys.ts`, routes in `server/keys.ts`
+- **Tag-source keys travel too, on unless a device opts out** (`sync/keys.ts`, routes in `server/keys.ts`
   shared by both shells). Only `SYNCABLE_KEYS` (every provider's `envVars` and optional `settings`)
   may enter a store, enforced in `normalizeSnapshot` via `syncableEntries`, so a Google key in a
   remote file is dropped. Newest change per key wins; a removal is `value: null`, kept like a
   tombstone. Whether a device *uses* them is `localSetting("usesSyncedKeys")`, which never syncs
-  (SQLite `local_settings`; localStorage in the browser). `providerEnv` is the one place that
+  (SQLite `local_settings`; localStorage in the browser); only "off" (`"0"`) is stored, so an
+  untouched device follows the default, on. `providerEnv` is the one place that
   decides what providers see: local keys win, synced ones fill gaps. The browser can rewrite its
-  own keys, so turning sync on moves them into the file (a local copy would otherwise outrank an
-  edit made elsewhere); the server cannot rewrite `.env`, so it shares explicitly.
+  own keys, so sharing (or turning sync back on) moves them into the file, and keys saved while
+  it is on go straight there (a local copy would otherwise outrank an edit made elsewhere); the
+  server cannot rewrite `.env`, so it copies them up. Keys already on a device are shared only
+  by an explicit action; the one implicit path is a key saved in the browser while sync is on.
 - Both stores implement `Syncable` (`snapshot()`/`absorb()`), and the compiler enforces it.
   SQLite's `absorb` also bumps `sqlite_sequence`, or `AUTOINCREMENT` would hand out an id a merge
   had just assigned to something else.

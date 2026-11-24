@@ -163,7 +163,7 @@ function keyRoute(change: () => KeySyncView): KeySyncView {
   return change();
 }
 
-/** The keys providers see here: this browser's own, with synced ones filling gaps if opted in. */
+/** The keys providers see here: this browser's own, with synced ones filling gaps unless off. */
 export function effectiveKeys(): Record<string, string | undefined> {
   return providerEnv(getKeys(), ready()).env;
 }

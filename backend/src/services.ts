@@ -70,7 +70,7 @@ export function createEnrichers(
     budget,
     enrichers: {
       mapper: new TagMapper(loadTagMap(config.tagMapPath)),
-      // Keys synced through Drive fill in for missing local ones, if this device opted in.
+      // Keys synced through Drive fill in for missing local ones, unless this device opted out.
       clients: createProviderClients(deps, providerEnv(config.env, store).env, options.skip),
     },
   };

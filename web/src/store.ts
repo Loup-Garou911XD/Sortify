@@ -790,7 +790,7 @@ export class BrowserStore implements Syncable {
       if (value === null) localStorage.removeItem(LOCAL_PREFIX + name);
       else localStorage.setItem(LOCAL_PREFIX + name, value);
     } catch {
-      // Storage blocked: the setting holds for this page only, which is the safe default (off).
+      // Storage blocked: the setting holds for this page only, then falls back to its default.
     }
   }
 

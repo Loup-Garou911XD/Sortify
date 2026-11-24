@@ -9,7 +9,6 @@ import { api } from "../api.ts";
 import { plural, type Theme } from "../hooks.ts";
 import {
   IconClose,
-  IconGitHub,
   IconInbox,
   IconMenu,
   IconMonitor,
@@ -23,9 +22,6 @@ import {
 import { KeySyncDialog } from "./KeySyncDialog.tsx";
 import { SYNC_LABEL, SYNC_TONE, SyncDialog } from "./SyncDialog.tsx";
 import { Button, Menu, MenuItem, type Tone } from "./ui.tsx";
-
-/** Where the source lives; shown in the top bar and the only outward link the app carries. */
-const REPO_URL = "https://github.com/Loup-Garou911XD/Sortify";
 
 /**
  * One row of the Connections panel. It is a plain block normally, and a button when the shell
@@ -395,17 +391,6 @@ export function TopBar({
             )}
           </Menu>
         )}
-
-        <a
-          className="btn btn-ghost btn-icon"
-          href={REPO_URL}
-          target="_blank"
-          rel="noreferrer"
-          aria-label="Sortify on GitHub"
-          title="Sortify on GitHub"
-        >
-          <IconGitHub size={16} />
-        </a>
 
         <Button
           variant="ghost"

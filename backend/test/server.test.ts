@@ -210,30 +210,32 @@ describe("api", () => {
     // Another device shared a Last.fm key; this one has Discogs in its own .env.
     store.putSyncedKeys([{ name: "LASTFM_API_KEY", value: "l", at: new Date().toISOString() }]);
 
+    // On by default: the synced Last.fm key is in use straight away.
     const before = (await api<StatusResponse>("/api/status")).body;
     expect(before.keySync).toEqual({
-      enabled: false,
+      enabled: true,
       inDrive: ["LASTFM_API_KEY"],
+      onDevice: ["DISCOGS_TOKEN"],
       keysMovable: false,
     });
-    expect(before.sources.find((s) => s.id === "lastfm")?.configured).toBe(false);
-
-    const on = await api<KeySyncView>("/api/keys/sync", {
-      method: "POST",
-      body: { enabled: true },
-    });
-    expect(on.body).toEqual({ enabled: true, inDrive: ["LASTFM_API_KEY"], keysMovable: false });
-    const after = (await api<StatusResponse>("/api/status")).body;
-    expect(after.sources.find((s) => s.id === "lastfm")).toMatchObject({
+    expect(before.sources.find((s) => s.id === "lastfm")).toMatchObject({
       configured: true,
       fromDrive: true,
     });
-    expect(after.sources.find((s) => s.id === "discogs")?.fromDrive).toBeUndefined();
-    expect(after.keySync?.keysMovable).toBe(false);
+    expect(before.sources.find((s) => s.id === "discogs")?.fromDrive).toBeUndefined();
+
+    const disabled = await api<KeySyncView>("/api/keys/sync", {
+      method: "POST",
+      body: { enabled: false },
+    });
+    expect(disabled.body.enabled).toBe(false);
+    const after = (await api<StatusResponse>("/api/status")).body;
+    expect(after.sources.find((s) => s.id === "lastfm")?.configured).toBe(false);
+    await api("/api/keys/sync", { method: "POST", body: { enabled: true } });
 
     const shared = await api<KeySyncView>("/api/keys/share", { method: "POST" });
     expect(shared.body.inDrive).toEqual(["DISCOGS_TOKEN", "LASTFM_API_KEY"]);
-    expect(pushes).toBe(2);
+    expect(pushes).toBe(3);
   });
 
   it("syncs on demand, or says sync is off", async () => {

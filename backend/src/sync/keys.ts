@@ -6,7 +6,8 @@
  * keeping them out is enforced here, at the point where remote data enters (`syncableEntries`),
  * not only by what devices choose to send.
  *
- * Whether a device uses the synced keys is its own switch, off by default and never synced (see
+ * Whether a device uses the synced keys is its own switch, on unless turned off there, and never
+ * synced (see
  * `usesSyncedKeys`). Keys a device has locally (`.env`, the environment, this browser's storage)
  * always win; synced keys only fill the gaps. Free of `node:` imports, like the rest of `sync/`.
  */
@@ -113,14 +114,17 @@ export interface KeyStore {
 
 const USE_SYNCED_KEYS = "usesSyncedKeys";
 
-/** Whether this device uses the synced keys. Off unless turned on here; never synced. */
+/**
+ * Whether this device uses the synced keys: on unless turned off here. Off is stored, not on, so
+ * a device that never touched the switch follows the default. Never synced.
+ */
 export const usesSyncedKeys = (store: KeyStore): boolean =>
-  store.localSetting(USE_SYNCED_KEYS) === "1";
+  store.localSetting(USE_SYNCED_KEYS) !== "0";
 
 export const setUsesSyncedKeys = (store: KeyStore, on: boolean): void =>
-  store.setLocalSetting(USE_SYNCED_KEYS, on ? "1" : null);
+  store.setLocalSetting(USE_SYNCED_KEYS, on ? null : "0");
 
-/** The environment providers should get on this device: `withSyncedKeys` when it opted in. */
+/** The environment providers should get on this device: `withSyncedKeys` unless it opted out. */
 export function providerEnv(
   env: Record<string, string | undefined>,
   store: KeyStore,

@@ -2,8 +2,11 @@ import { useState } from "react";
 import { useApp } from "../App.tsx";
 import { fmt, pct, planName } from "../hooks.ts";
 import { AddPlaylistDialog } from "./AddPlaylistDialog.tsx";
-import { IconPlus } from "./icons.tsx";
+import { IconGitHub, IconPlus } from "./icons.tsx";
 import { Button, Progress, StatusPill } from "./ui.tsx";
+
+/** Where the source lives; shown at the foot of the sidebar and the only outward link the app carries. */
+const REPO_URL = "https://github.com/Loup-Garou911XD/Sortify";
 
 export function Sidebar({ path, open }: { path: string; open: boolean }) {
   const { playlists, runs, status, navigate, openSignIn } = useApp();
@@ -104,6 +107,11 @@ export function Sidebar({ path, open }: { path: string; open: boolean }) {
           </ul>
         </section>
       )}
+
+      <a className="sidebar-foot" href={REPO_URL} target="_blank" rel="noreferrer">
+        <IconGitHub size={15} />
+        Sortify on GitHub
+      </a>
     </nav>
   );
 }

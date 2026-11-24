@@ -30,6 +30,7 @@ export interface DeviceKeys {
 export const keySyncView = (store: KeyStore, device: DeviceKeys): KeySyncView => ({
   enabled: usesSyncedKeys(store),
   inDrive: Object.keys(liveKeys(store.syncedKeys())),
+  onDevice: Object.keys(localSyncableKeys(device.read())),
   keysMovable: device.write !== undefined,
 });
 
@@ -77,7 +78,10 @@ export function setKeySync(store: KeyStore, device: DeviceKeys, body: unknown): 
   return keySyncView(store, device);
 }
 
-/** `POST /api/keys/share`: puts this device's own tag-source keys into the sync file. */
+/**
+ * `POST /api/keys/share`: puts this device's own tag-source keys into the sync file. A browser
+ * moves them (see `moveToSync`); a server copies them out of its `.env`, which stays as it is.
+ */
 export function shareKeys(store: KeyStore, device: DeviceKeys): KeySyncView {
   if (!usesSyncedKeys(store)) {
     throw new RequestError(409, "Turn on key sync on this device first.");
@@ -86,7 +90,7 @@ export function shareKeys(store: KeyStore, device: DeviceKeys): KeySyncView {
   if (Object.keys(mine).length === 0) {
     throw new RequestError(409, "This device has no tag-source keys of its own to share.");
   }
-  store.putSyncedKeys(keyChanges(mine));
+  moveToSync(store, device, mine);
   return keySyncView(store, device);
 }
 

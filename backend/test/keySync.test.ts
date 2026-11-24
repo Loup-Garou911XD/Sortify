@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Store } from "../src/db.ts";
-import { forgetKeys, setKeySync, shareKeys } from "../src/server/keys.ts";
+import { forgetKeys, keySyncView, setKeySync, shareKeys } from "../src/server/keys.ts";
 import {
   type KeySnapshot,
   keyChanges,
@@ -8,6 +8,7 @@ import {
   mergeKeys,
   providerEnv,
   setUsesSyncedKeys,
+  usesSyncedKeys,
   withSyncedKeys,
 } from "../src/sync/keys.ts";
 import { emptySnapshot, mergeSnapshots, normalizeSnapshot } from "../src/sync/snapshot.ts";
@@ -69,12 +70,13 @@ describe("synced keys: the SQLite store", () => {
   it("carries keys through a sync, but never this device's own settings", () => {
     const a = new Store(":memory:");
     a.putSyncedKeys(keyChanges({ DISCOGS_TOKEN: "d", LASTFM_API_KEY: "l" }));
-    setUsesSyncedKeys(a, true);
+    setUsesSyncedKeys(a, false);
     const b = new Store(":memory:");
     b.absorb(a.snapshot());
     expect(liveKeys(b.syncedKeys())).toEqual({ DISCOGS_TOKEN: "d", LASTFM_API_KEY: "l" });
-    // The switch is per device: b has not opted in just because a did.
-    expect(b.localSetting("usesSyncedKeys")).toBeUndefined();
+    // The switch is per device: a turning it off leaves b on the default, which is on.
+    expect(usesSyncedKeys(a)).toBe(false);
+    expect(usesSyncedKeys(b)).toBe(true);
 
     // A removal on b travels back and wins over a's older value.
     b.putSyncedKeys(keyChanges({ LASTFM_API_KEY: "" }));
@@ -84,17 +86,19 @@ describe("synced keys: the SQLite store", () => {
 });
 
 describe("synced keys: what providers see", () => {
-  it("fills only the gaps, and only on a device that opted in", () => {
+  it("fills only the gaps, by default, and not on a device that turned it off", () => {
     const store = new Store(":memory:");
     store.putSyncedKeys(keyChanges({ DISCOGS_TOKEN: "synced", LASTFM_API_KEY: "synced" }));
     const local = { DISCOGS_TOKEN: "mine", LASTFM_API_KEY: "  " };
 
-    expect(providerEnv(local, store)).toEqual({ env: local, fromSync: [] });
-    setUsesSyncedKeys(store, true);
     expect(providerEnv(local, store)).toEqual({
       env: { DISCOGS_TOKEN: "mine", LASTFM_API_KEY: "synced" },
       fromSync: ["LASTFM_API_KEY"],
     });
+    setUsesSyncedKeys(store, false);
+    expect(providerEnv(local, store)).toEqual({ env: local, fromSync: [] });
+    setUsesSyncedKeys(store, true);
+    expect(providerEnv(local, store).fromSync).toEqual(["LASTFM_API_KEY"]);
     expect(withSyncedKeys({}, {}).fromSync).toEqual([]);
   });
 });
@@ -123,30 +127,50 @@ describe("synced keys: the routes", () => {
     const store = new Store(":memory:");
     const b = browser({ DISCOGS_TOKEN: "d", GOOGLE_CLIENT_ID: "g" });
 
-    expect(setKeySync(store, b.device, { enabled: true })).toEqual({
+    // On by default, but nothing travels until the browser shares its keys.
+    expect(keySyncView(store, b.device)).toEqual({
+      enabled: true,
+      inDrive: [],
+      onDevice: ["DISCOGS_TOKEN"],
+      keysMovable: true,
+    });
+    expect(shareKeys(store, b.device)).toEqual({
       enabled: true,
       inDrive: ["DISCOGS_TOKEN"],
+      onDevice: [],
       keysMovable: true,
     });
     expect(b.keys()).toEqual({ GOOGLE_CLIENT_ID: "g" });
     expect(providerEnv(b.keys(), store).env.DISCOGS_TOKEN).toBe("d");
 
-    // Turning it off copies the synced keys back, so nothing stops working here.
+    // Turning it off copies the synced keys back, so nothing stops working here; turning it on
+    // again moves them back into Drive.
     setKeySync(store, b.device, { enabled: false });
     expect(b.keys()).toEqual({ GOOGLE_CLIENT_ID: "g", DISCOGS_TOKEN: "d" });
+    setKeySync(store, b.device, { enabled: true });
+    expect(b.keys()).toEqual({ GOOGLE_CLIENT_ID: "g" });
   });
 
   it("shares .env keys without touching them, and forgets them everywhere", () => {
     const store = new Store(":memory:");
     const env = { read: () => ({ DISCOGS_TOKEN: "d", SORTIFY_CLIENT_SECRETS: "{}" }) };
 
+    setKeySync(store, env, { enabled: false });
     expect(() => shareKeys(store, env)).toThrow(/Turn on key sync/);
     setKeySync(store, env, { enabled: true });
     // Nothing moves on enabling: a server cannot rewrite its .env.
     expect(liveKeys(store.syncedKeys())).toEqual({});
-    expect(shareKeys(store, env).inDrive).toEqual(["DISCOGS_TOKEN"]);
+    const shared = shareKeys(store, env);
+    expect(shared.inDrive).toEqual(["DISCOGS_TOKEN"]);
+    // Still on the device: copying out of .env leaves .env as it was.
+    expect(shared.onDevice).toEqual(["DISCOGS_TOKEN"]);
 
-    expect(forgetKeys(store, env)).toEqual({ enabled: false, inDrive: [], keysMovable: false });
+    expect(forgetKeys(store, env)).toEqual({
+      enabled: false,
+      inDrive: [],
+      onDevice: ["DISCOGS_TOKEN"],
+      keysMovable: false,
+    });
     // Forgetting leaves a removal behind, so a merge cannot bring the key back.
     expect(store.syncedKeys()).toMatchObject([{ name: "DISCOGS_TOKEN", value: null }]);
     expect(() => setKeySync(store, env, { enabled: "yes" })).toThrow(/true or false/);

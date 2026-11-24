@@ -123,8 +123,8 @@ export interface Snapshot {
   /** Plans deleted on some device, for the same reason. */
   deletedRuns: RunTombstone[];
   /**
-   * Tag-source API keys, for devices that opted in to using them (see `sync/keys.ts`). Carried
-   * by every device either way, so one that has not opted in cannot drop another's keys.
+   * Tag-source API keys, for devices that use them (see `sync/keys.ts`). Carried by every device
+   * either way, so one that turned key sync off cannot drop another's keys.
    */
   keys: KeySnapshot[];
   /** Highest ids handed out so far, so neither side reuses one after a merge. */

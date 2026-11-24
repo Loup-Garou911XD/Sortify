@@ -381,6 +381,23 @@ input[type="checkbox"] {
   flex-direction: column;
   gap: 8px;
 }
+/* The repository link, pinned to the bottom of the sidebar when its lists are short. */
+.sidebar-foot {
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.sidebar-foot:hover {
+  background: var(--panel-2);
+  color: var(--ink);
+  text-decoration: none;
+}
 .scrim {
   display: none;
 }

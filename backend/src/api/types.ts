@@ -93,10 +93,12 @@ export interface ProviderStatus {
 
 /** Tag-source keys in the sync file, and whether this device uses them (see sync/keys.ts). */
 export interface KeySyncView {
-  /** This device's own switch, off by default. */
+  /** This device's own switch, on unless turned off here. */
   enabled: boolean;
   /** Names of the keys currently in the sync file. */
   inDrive: string[];
+  /** Names of the tag-source keys this device holds itself, which it could share. */
+  onDevice: string[];
   /**
    * Turning sync on moves this device's own keys into the sync file (the browser, which can
    * rewrite its keys); otherwise they stay put and are shared explicitly (a server's `.env`).
