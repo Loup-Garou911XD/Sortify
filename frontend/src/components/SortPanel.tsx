@@ -14,7 +14,6 @@ import {
   pct,
   planName,
   plural,
-  quotaFor,
   UNSORTED,
   useDebounced,
 } from "../hooks.ts";
@@ -43,7 +42,7 @@ const DIMENSIONS: { value: Dimension; label: string }[] = [
 ];
 
 export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: TrackView[] }) {
-  const { status, version, navigate, refresh, runs } = useApp();
+  const { version, navigate, refresh, runs } = useApp();
   const [dimension, setDimension] = useState<Dimension>("subgenre");
   const [minSize, setMinSize] = useState(5);
   const [maxGroups, setMaxGroups] = useState(0);
@@ -125,7 +124,6 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
   // where it matters, just before anything is written.
   const noneTagged = tracks.length > 0 && tracks.every((t) => !t.enriched);
   const additions = included.reduce((sum, d) => sum + d.videoIds.length, 0);
-  const quota = quotaFor(included.length, additions, status?.dailyQuota ?? 10_000);
   // Every card's bar is drawn against the biggest bin, so the grid reads as a histogram.
   const largest = Math.max(1, ...drafts.map((d) => d.videoIds.length));
   const nameCounts = new Map<string, number>();
@@ -238,18 +236,6 @@ export function SortPanel({ playlistId, tracks }: { playlistId: string; tracks: 
               <div className="summary-figure">
                 <strong>{plural(included.length, "playlist")}</strong>
                 <span className="muted small">{plural(additions, "track addition")}</span>
-              </div>
-              <div className="summary-figure">
-                <strong>{fmt(quota.units)}</strong>
-                <span className="muted small">
-                  {quota.days <= 1 ? (
-                    "quota units, fits in one day"
-                  ) : (
-                    <span className="warn-text">
-                      quota units, about {quota.days} days at the daily limit
-                    </span>
-                  )}
-                </span>
               </div>
               <div className="summary-figure">
                 <div className="summary-coverage">

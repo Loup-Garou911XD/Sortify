@@ -915,6 +915,10 @@ li:hover > .row-btn,
   background: var(--brand);
   transition: width var(--d-meter) var(--ease);
 }
+/* The bar takes the notice's own colour, so an amber warning stays amber throughout. */
+.notice .meter-fill {
+  background: currentColor;
+}
 .meter-good .meter-fill {
   background: var(--good);
 }
@@ -1162,6 +1166,18 @@ li:hover > .row-btn,
 .notice-good {
   background: var(--good-tint);
   color: var(--good);
+}
+/* The quota notice in the create confirmation: a headline, a bar of today's quota, the detail. */
+.quota-headline {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.notice .meter {
+  margin-bottom: 8px;
+}
+.quota-detail {
+  margin: 0;
+  line-height: 1.5;
 }
 .notice-list {
   margin: 7px 0 0;

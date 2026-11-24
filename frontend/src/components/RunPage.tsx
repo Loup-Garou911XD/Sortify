@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Privacy, RunDetail } from "../../../backend/src/api/types.ts";
 import { useApp } from "../App.tsx";
 import { api } from "../api.ts";
-import { fmt, planName, plural, quotaFor, timeAgo, UNSORTED, useResource } from "../hooks.ts";
+import { fmt, pct, planName, plural, quotaFor, timeAgo, UNSORTED, useResource } from "../hooks.ts";
 import { IconArrowLeft, IconExternal, IconMusic, IconPlay, IconTrash } from "./icons.tsx";
 import { Button, ConfirmDialog, Field, Notice, PageSkeleton, Progress, StatusPill } from "./ui.tsx";
 
@@ -201,11 +201,37 @@ export function RunPage({ runId }: { runId: number }) {
             )}
             {toCreate === 0 && "Add "}
             <strong>{plural(pending, "track")}</strong>
-            {writeLimit ? `, stopping after ${plural(writeLimit, "write")}` : ""}. This uses about{" "}
-            {fmt(quota.units)} of your {fmt(status.dailyQuota)} daily quota units
-            {quota.days > 1 && `, so it will take about ${quota.days} days`}. If the quota runs out,
-            the plan pauses and you can resume it after midnight Pacific time.
+            {writeLimit ? `, stopping after ${plural(writeLimit, "write")}` : ""}.
           </p>
+          {/* Quota is the cost that cannot be undone today, so it gets its own notice. */}
+          <Notice tone={quota.days > 1 ? "warn" : "info"}>
+            <p className="quota-headline">
+              {quota.days > 1 ? (
+                <>
+                  Takes about <strong>{quota.days} days</strong> of YouTube quota
+                </>
+              ) : (
+                <>
+                  Uses <strong>{pct(quota.units, status.dailyQuota)}%</strong> of today's YouTube
+                  quota
+                </>
+              )}
+            </p>
+            <Progress
+              value={Math.min(quota.units, status.dailyQuota)}
+              max={status.dailyQuota}
+              label="Share of today's quota"
+            />
+            <p className="quota-detail">
+              <strong>
+                {fmt(quota.units)} of your {fmt(status.dailyQuota)}
+              </strong>{" "}
+              daily units: 50 for each playlist created and each track added.{" "}
+              {quota.days > 1
+                ? "The plan pauses each time the quota runs out; resume it after midnight Pacific time, when the quota resets."
+                : "If the quota runs out anyway (other YouTube use spends it too), the plan pauses and you can resume it after midnight Pacific time."}
+            </p>
+          </Notice>
           {/* The last chance to notice: after this, the untagged tracks are written as they are. */}
           {untagged > 0 && <Notice tone="warn">{untaggedWarning}</Notice>}
         </ConfirmDialog>
